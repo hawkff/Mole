@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/hints.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
+source "$SCRIPT_DIR/../lib/clean/sparkle.sh"
 
 SYSTEM_CLEAN=false
 DRY_RUN=false
@@ -1715,6 +1716,7 @@ perform_cleanup() {
             # ===== 3. App caches (merged sandboxed and standard app caches) =====
             start_section "App caches"
             _run_cleanup_step clean_app_caches || return $?
+            _run_cleanup_step clean_sparkle_downloads || return $?
             end_section
 
             # ===== 4. Browsers =====

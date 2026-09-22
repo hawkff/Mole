@@ -1239,37 +1239,6 @@ _autodesk_fusion_version_dir_version() {
     _MOLE_AUTODESK_FUSION_APP="$app_candidate"
 }
 
-_autodesk_fusion_version_is_older() {
-    local candidate_version="$1"
-    local current_version="$2"
-    [[ "$candidate_version" =~ ^[0-9]+([.][0-9]+)*$ ]] || return 1
-    [[ "$current_version" =~ ^[0-9]+([.][0-9]+)*$ ]] || return 1
-
-    local saved_ifs="$IFS"
-    IFS='.'
-    # shellcheck disable=SC2206 # intentional numeric version split
-    local -a candidate_parts=($candidate_version)
-    # shellcheck disable=SC2206 # intentional numeric version split
-    local -a current_parts=($current_version)
-    IFS="$saved_ifs"
-
-    local count=${#candidate_parts[@]}
-    [[ ${#current_parts[@]} -gt $count ]] && count=${#current_parts[@]}
-    local index candidate_part current_part
-    for ((index = 0; index < count; index++)); do
-        candidate_part="${candidate_parts[$index]:-0}"
-        current_part="${current_parts[$index]:-0}"
-        # Avoid arithmetic overflow on corrupt metadata. Unknown is retained.
-        [[ ${#candidate_part} -le 9 && ${#current_part} -le 9 ]] || return 1
-        if ((10#$candidate_part < 10#$current_part)); then
-            return 0
-        elif ((10#$candidate_part > 10#$current_part)); then
-            return 1
-        fi
-    done
-    return 1
-}
-
 _autodesk_fusion_resolve_current_dir() {
     local production_root="$1"
     local deadline_seconds="$2"
@@ -1420,7 +1389,7 @@ _autodesk_fusion_plan_old_versions() {
             continue
         fi
         candidate_version="$_MOLE_AUTODESK_FUSION_VERSION"
-        _autodesk_fusion_version_is_older \
+        mole_version_is_older \
             "$candidate_version" "$current_version" || continue
         if should_protect_path "$dir" || is_path_whitelisted "$dir" ||
             (declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$dir"); then
@@ -1501,7 +1470,7 @@ _autodesk_fusion_delete_guard_allows() {
         [[ $version_rc -eq 124 || $version_rc -ge 128 ]] && return "$version_rc"
         return 1
     fi
-    if ! _autodesk_fusion_version_is_older \
+    if ! mole_version_is_older \
         "$_MOLE_AUTODESK_FUSION_VERSION" \
         "$_MOLE_AUTODESK_FUSION_GUARD_CURRENT_VERSION"; then
         _MOLE_AUTODESK_FUSION_GUARD_REASON="retention changed"

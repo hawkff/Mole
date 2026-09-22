@@ -811,6 +811,36 @@ format_free_space_delta_kb() {
     printf '%s%s\n' "$sign" "$(bytes_to_human_kb "$abs_kb")"
 }
 
+# Strict dotted-decimal ordering only. Unknown or equal versions are retained.
+mole_version_is_older() {
+    local candidate_version="$1"
+    local current_version="$2"
+    [[ ${#candidate_version} -le 128 && "$candidate_version" =~ ^[0-9]{1,9}([.][0-9]{1,9})*$ ]] || return 1
+    [[ ${#current_version} -le 128 && "$current_version" =~ ^[0-9]{1,9}([.][0-9]{1,9})*$ ]] || return 1
+
+    local saved_ifs="$IFS"
+    IFS='.'
+    # shellcheck disable=SC2206 # intentional numeric version split
+    local -a candidate_parts=($candidate_version)
+    # shellcheck disable=SC2206 # intentional numeric version split
+    local -a current_parts=($current_version)
+    IFS="$saved_ifs"
+
+    local count=${#candidate_parts[@]}
+    [[ ${#current_parts[@]} -gt $count ]] && count=${#current_parts[@]}
+    local index candidate_part current_part
+    for ((index = 0; index < count; index++)); do
+        candidate_part="${candidate_parts[$index]:-0}"
+        current_part="${current_parts[$index]:-0}"
+        if ((10#$candidate_part < 10#$current_part)); then
+            return 0
+        elif ((10#$candidate_part > 10#$current_part)); then
+            return 1
+        fi
+    done
+    return 1
+}
+
 mole_is_reverse_dns_bundle_id() {
     local bundle_id="${1:-}"
 

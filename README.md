@@ -134,6 +134,8 @@ The examples below are shortened. Available items, sizes, and skip reasons depen
 
 `mo clean` reviews known-safe caches, logs, temporary files, developer artifacts, and leftovers from apps that are no longer installed. Use `mo clean --dry-run` to preview eligible paths, and `mo clean --whitelist` to protect caches you want to keep.
 
+For Sparkle updater downloads under `~/Library/Caches/<bundle-id>/org.sparkle-project.Sparkle/PersistentDownloads`, Mole compares the cached and installed build versions. It removes a verified older payload as one item, including its archive and extracted app, and shows the owner, versions, path, and estimated size. Equal/newer versions, recent activity within 7 days, ambiguous metadata, protected paths, running updaters, open files, and mounted images stay. Most payloads need a matching app `Info.plist`; incomplete Brave Nightly bundles can use a verified framework version directory instead. Installation staging, installed apps, browser profiles, and other updater systems are not targets.
+
 ```text
 $ mo clean
 

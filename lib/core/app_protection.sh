@@ -362,6 +362,25 @@ should_protect_path() {
         return 0
     fi
 
+    # PersistentDownloads can contain a pending update. Keep generic cache
+    # sweeps from deleting its parent or its contents. Only the exact payload
+    # bound to the Sparkle cleaner's final guard may pass this extra gate.
+    if [[ "${MOLE_UNINSTALL_MODE:-0}" != "1" ]]; then
+        if [[ -e "$path/org.sparkle-project.Sparkle/PersistentDownloads" ||
+            -L "$path/org.sparkle-project.Sparkle/PersistentDownloads" ]]; then
+            return 0
+        fi
+        case "$path" in
+            "$HOME/Library/Caches/"*/org.sparkle-project.Sparkle/PersistentDownloads | \
+                "$HOME/Library/Caches/"*/org.sparkle-project.Sparkle/PersistentDownloads/*)
+                if [[ "$path" != "${_MOLE_SPARKLE_APPROVED_PAYLOAD:-}" ||
+                    "${_MOLE_SAFE_REMOVE_FINAL_GUARD:-}" != "_sparkle_download_delete_guard" ]]; then
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+
     local _container_cache_path=false
     local _known_rebuildable_cache_path=false
 
