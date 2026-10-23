@@ -61,7 +61,7 @@ function Get-TerminalTextWidth {
 }
 
 function Format-SizeListEntry {
-    param([string]$Name, [string]$Size, [string]$Suffix = '', [int]$NameWidth = 42)
+    param([string]$Name, [string]$Size, [string]$Suffix = '', [int]$NameWidth = 42, [switch]$KeepEnd)
     # Leave six cells for the caller's selection prefix and one spare column
     # so writing the rightmost size never triggers terminal auto-wrap.
     $budget = [Math]::Max(1, (Get-TerminalSize).Width - 18 - (Get-TerminalTextWidth $Suffix))
@@ -70,17 +70,24 @@ function Format-SizeListEntry {
     if ((Get-TerminalTextWidth $nameText) -gt $nameCells) {
         $ending = '.' * [Math]::Min(3, $nameCells)
         $limit = $nameCells - $ending.Length
-        $builder = New-Object Text.StringBuilder
-        $used = 0
+        $parts = New-Object Collections.Generic.List[string]
         $elements = [Globalization.StringInfo]::GetTextElementEnumerator($nameText)
-        while ($elements.MoveNext()) {
-            $element = $elements.GetTextElement()
+        while ($elements.MoveNext()) { $parts.Add($elements.GetTextElement()) }
+        # A path is told apart by its last folders, so -KeepEnd drops the start.
+        if ($KeepEnd) { $parts.Reverse() }
+        $kept = New-Object Collections.Generic.List[string]
+        $used = 0
+        foreach ($element in $parts) {
             $cells = Get-TerminalTextWidth $element
             if ($used + $cells -gt $limit) { break }
-            $null = $builder.Append($element)
+            $kept.Add($element)
             $used += $cells
         }
-        $nameText = $builder.ToString() + $ending
+        if ($KeepEnd) {
+            $kept.Reverse()
+            $nameText = $ending + ($kept -join '')
+        }
+        else { $nameText = ($kept -join '') + $ending }
     }
     $padding = ' ' * [Math]::Max(0, $nameCells - (Get-TerminalTextWidth $nameText))
     return $nameText + $padding + ' ' + $Size.PadLeft(10) + $Suffix

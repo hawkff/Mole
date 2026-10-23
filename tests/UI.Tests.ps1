@@ -166,6 +166,14 @@ Describe 'Display-cell list columns' {
         (Get-TerminalTextWidth $row) | Should -Be 33
     }
 
+    It 'keeps the end of a long path visible when asked' {
+        Mock Get-TerminalSize { @{ Width = 60; Height = 24 } }
+        $row = Format-SizeListEntry -Name '~\Projects\client-work\storefront-redesign\frontend' -Size '1.2GB' -NameWidth 30 -KeepEnd
+        (Get-TerminalTextWidth $row) | Should -Be 41
+        $row | Should -Match '^\.\.\..*\\frontend +1\.2GB$'
+        (Format-SizeListEntry -Name '~\shop\frontend' -Size '1MB' -NameWidth 30 -KeepEnd) | Should -Match '^~\\shop\\frontend +1MB$'
+    }
+
     It 'settles interactive results once without delaying redirected output' {
         Mock Write-Host {}
         Mock Stop-Spinner {}
