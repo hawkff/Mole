@@ -24,7 +24,7 @@ BeforeAll {
     }
 
     Import-ScriptFunction -Script (Join-Path $script:WindowsDir "bin\uninstall.ps1") -Names @(
-        "Get-UninstallMethodDescription", "Uninstall-SelectedApps", "Get-MoleProperty", "Get-NormalizedFolderPath",
+        "Get-UninstallMethodDescription", "Uninstall-SelectedApps", "Invoke-MoleUninstallProcess", "Get-MoleProperty", "Get-NormalizedFolderPath",
         "Test-MoleInstallFolder", "Get-MoleInstallOwners", "Test-MoleLeftoverOwnership", "Test-UninstallEntryGone", "Get-MsiProductCode", "Split-UninstallCommand", "Test-InnoUninstaller",
         "Test-NsisUninstaller", "Test-SteamClientUninstaller", "Get-UninstallLaunch"
     )
@@ -43,7 +43,7 @@ Describe "mo uninstall --dry-run" {
         Set-DryRunMode -Enabled $true
         Reset-CleanupStats
         Mock Get-MoleInstallOwners { @{ Complete = $true; Owners = @() } }
-        Mock Start-Process { throw "Start-Process must not run in a dry run" }
+        Mock Invoke-MoleUninstallProcess { throw "Uninstaller must not run in a dry run" }
         Mock Remove-AppxPackage { throw "Remove-AppxPackage must not run in a dry run" }
     }
 
@@ -59,7 +59,7 @@ Describe "mo uninstall --dry-run" {
 
         { Uninstall-SelectedApps -Apps $apps 6>$null } | Should -Not -Throw
 
-        Should -Invoke Start-Process -Times 0
+        Should -Invoke Invoke-MoleUninstallProcess -Times 0
         Should -Invoke Remove-AppxPackage -Times 0
         Test-Path (Join-Path $leftover "app.dll") | Should -BeTrue
     }

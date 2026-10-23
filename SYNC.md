@@ -9,6 +9,12 @@ This is the synchronization entry point for **Mole CLI (Windows)**, branch `wind
 - Mole CLI (Windows) with Mole for Windows, and the two apps: Mole for Windows' root `SYNC.md` owns the detailed comparison.
 - App-owned records remain private. Public CLI records contain public behavior, source and tests only; never copy private catalogs, implementation details, support data or repository links here.
 
+## 2026-10-23 Bounded vendor-uninstaller wait
+
+Implemented (source, unreleased): `bin/uninstall.ps1:Invoke-MoleUninstallProcess` retains the vendor process-tree wait but stops waiting after 30 minutes. A timeout stops the batch, retains leftovers and never kills the vendor; a missing registration alone is not completion. The private app-owned record tracks the corresponding application contract. Mole CLI (macOS) uses a separate bounded Homebrew command path, so this Windows process-tree implementation does not transfer. Tests use owned parent/child processes, not third-party uninstallers; release, UAC launch and physical-machine acceptance remain separate.
+
+Mole CLI (macOS) `fb920811` addresses its two Optimize service signals through launchd rather than process names. Mole CLI (Windows) has no matching system-host restart, so that implementation is Not applicable here.
+
 ## CLI adaptation queue
 
 | ID | Topic | Status | Source, destination and next check |

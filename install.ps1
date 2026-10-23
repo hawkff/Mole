@@ -727,6 +727,7 @@ function Get-MoleInstallNestedFiles {
         "tests\TestRunner.Tests.ps1"
         "tests\UI.Tests.ps1"
         "tests\Uninstall.Tests.ps1"
+        "tests\UninstallWait.Tests.ps1"
     )
 }
 

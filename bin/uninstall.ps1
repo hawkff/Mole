@@ -664,6 +664,50 @@ function Get-UninstallLaunch {
 
 # An uninstall is done once its registry entry is gone or no longer names an app (a name
 # plus an uninstall command). A key that cannot be read counts as still installed.
+# Keep Start-Process's descendant wait, but bound Mole's wait without killing the
+# vendor. Stop cancels the cmdlet pipeline; it is not Stop-Process or taskkill.
+# A timeout is never success, even if registration vanished while work continues.
+# Thirty minutes is a conservative interactive-uninstall ceiling, not an idle
+# threshold. No existing CLI deadline covers vendor uninstallers. The shorter
+# injectable deadline is only for tests; callers use the fixed default.
+function Invoke-MoleUninstallProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [ValidateRange(1, 1800000)][int]$TimeoutMilliseconds = 1800000
+    )
+
+    $runner = [powershell]::Create()
+    $pending = $null
+    try {
+        $null = $runner.AddCommand('Start-Process').AddParameter('FilePath', $FilePath)
+        $null = $runner.AddParameter('Wait', $true).AddParameter('PassThru', $true).AddParameter('ErrorAction', 'Stop')
+        if ($ArgumentList) { $null = $runner.AddParameter('ArgumentList', $ArgumentList) }
+        $pending = $runner.BeginInvoke()
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        # Short waits let Ctrl+C unwind this function and cancel the waiting pipeline.
+        while (-not $pending.AsyncWaitHandle.WaitOne(250)) {
+            if ($clock.Elapsed.TotalMilliseconds -ge $TimeoutMilliseconds) {
+                throw [TimeoutException]::new('Uninstaller wait timed out; batch stopped, leftovers kept.')
+            }
+        }
+        $result = @($runner.EndInvoke($pending))
+        if ($runner.HadErrors -or $result.Count -ne 1) {
+            throw 'Uninstaller completion could not be verified.'
+        }
+        try { return [pscustomobject]@{ ExitCode = $result[0].ExitCode } }
+        finally { $result[0].Dispose() }
+    }
+    finally {
+        # Cleanup errors must not replace timeout/cancellation and let the caller
+        # proceed to another app while this vendor may still be running.
+        try { if ($null -ne $pending -and -not $pending.IsCompleted) { $runner.Stop() } }
+        catch { Write-Debug "Uninstaller wait cancellation failed: $_" }
+        try { $runner.Dispose() }
+        catch { Write-Debug "Uninstaller wait disposal failed: $_" }
+    }
+}
+
 function Test-UninstallEntryGone {
     param([string]$KeyPath)
 
@@ -1211,11 +1255,11 @@ function Uninstall-SelectedApps {
                 continue
             }
 
-            $startArgs = @{ FilePath = $launch.FilePath; Wait = $true; PassThru = $true }
+            $startArgs = @{ FilePath = $launch.FilePath }
             if ($launch.Arguments) {
                 $startArgs.ArgumentList = $launch.Arguments
             }
-            $process = Start-Process @startArgs
+            $process = Invoke-MoleUninstallProcess @startArgs
             $exitCode = Get-MoleProperty $process 'ExitCode'
 
             # A cancelled, failed or still-running uninstall leaves its entry behind, and
@@ -1238,6 +1282,13 @@ function Uninstall-SelectedApps {
                 $guard = { param($candidate) Test-MoleLeftoverOwnership -Path $candidate -App $app }
                 $null = Remove-SafeItem -Path $folder -Description "Leftover files to Recycle Bin" -Recurse -Recycle -Guard $guard
             }
+        }
+        catch [TimeoutException] {
+            Write-Host " $esc[31m$($_.Exception.Message)$esc[0m"
+            Write-MoleOperation -Action "FAILED" -Path $app.Name -Detail (Get-UninstallOperationDetail -App $app -Outcome $_.Exception.Message -Launch $launch)
+            $failCount++
+            # Do not overlap the next uninstaller with the still-running vendor.
+            break
         }
         catch {
             Write-Host " $esc[31m$($script:Icons.Error)$esc[0m"

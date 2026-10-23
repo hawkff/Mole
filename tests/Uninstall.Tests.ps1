@@ -29,6 +29,11 @@ BeforeAll {
         . ([scriptblock]::Create($definition.Extent.Text))
     }
 
+    # Permit old-source red runs; the old caller still invokes Start-Process directly.
+    if (-not (Get-Command Invoke-MoleUninstallProcess -ErrorAction SilentlyContinue)) {
+        function Invoke-MoleUninstallProcess { param($FilePath, $ArgumentList) }
+    }
+
     $script:CacheDir = Join-Path $TestDrive "cache"
     $script:AppCacheFile = Join-Path $script:CacheDir "apps.json"
 
@@ -273,7 +278,7 @@ Describe "Uninstalling registry apps" {
     BeforeEach {
         Set-DryRunMode -Enabled $false
         Mock Write-Host {}
-        Mock Start-Process { [PSCustomObject]@{ ExitCode = 1 } }
+        Mock Invoke-MoleUninstallProcess { [PSCustomObject]@{ ExitCode = 1 } }
         Mock Remove-SafeItem { $true }
         Mock Get-MoleInstallOwners { @{ Complete = $true; Owners = @() } }
         Mock Remove-AppxPackage { throw "Remove-AppxPackage must not run" }
@@ -285,6 +290,19 @@ Describe "Uninstalling registry apps" {
         $script:GoneKey = "$((Get-Item -LiteralPath $script:RegistryRoot).PSPath)\removed-by-uninstaller"
     }
 
+    It "Stops the batch on an uninstaller timeout even after registration disappears" {
+        Mock Invoke-MoleUninstallProcess { throw [TimeoutException]::new('test timeout') }
+        Mock Start-Process { [pscustomobject]@{ ExitCode = 0 } }
+        $app = [pscustomobject]@{
+            Name = 'Resident'; Source = 'Registry'; UninstallString = "`"$script:Uninstaller`""
+            InstallLocation = $script:AppFolder; RegistryKey = $script:GoneKey; PackageFullName = $null
+        }
+        Uninstall-SelectedApps -Apps @($app, $app)
+        Should -Invoke Remove-SafeItem -Times 0 -Exactly
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly
+        Should -Invoke Start-Process -Times 0 -Exactly
+    }
+
     It "Runs an unrecognised uninstaller exactly once, as registered" {
         $app = [PSCustomObject]@{
             Name = "Contoso Tool"; Source = "Registry"; UninstallString = "`"$script:Uninstaller`""
@@ -293,8 +311,8 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 1 -Exactly
-        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly -ParameterFilter {
             $FilePath -eq $script:Uninstaller -and $null -eq $ArgumentList
         }
     }
@@ -348,7 +366,7 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly -ParameterFilter {
             $FilePath -like "*\System32\msiexec.exe" -and
             ($ArgumentList -join " ") -eq "/x $code /passive REBOOT=ReallySuppress /norestart"
         }
@@ -363,7 +381,7 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly -ParameterFilter {
             $FilePath -eq $script:Uninstaller -and ($ArgumentList -join " ") -eq "--mode unattended"
         }
     }
@@ -379,7 +397,7 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly -ParameterFilter {
             $FilePath -eq $inno -and ($ArgumentList -join " ") -eq "/SILENT /SUPPRESSMSGBOXES /NORESTART"
         }
     }
@@ -394,7 +412,7 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke Invoke-MoleUninstallProcess -Times 1 -Exactly -ParameterFilter {
             $FilePath -eq $nsis -and ($ArgumentList -join " ") -eq "/S"
         }
     }
@@ -450,7 +468,7 @@ Describe "Uninstalling registry apps" {
 
         Uninstall-SelectedApps -Apps @($app)
 
-        Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Invoke-MoleUninstallProcess -Times 0 -Exactly
         Should -Invoke Remove-SafeItem -Times 0 -Exactly
     }
 }
@@ -460,7 +478,7 @@ Describe "Uninstall dry run leftovers" {
         Set-DryRunMode -Enabled $true
         $script:Icons = Get-MoleDefaultIcons
         Mock Write-Host {}
-        Mock Start-Process { throw "Start-Process must not run in a dry run" }
+        Mock Invoke-MoleUninstallProcess { throw "Start-Process must not run in a dry run" }
         Mock Remove-SafeItem { $true }
         Mock Get-MoleInstallOwners { @{ Complete = $true; Owners = @() } }
     }
@@ -478,7 +496,7 @@ Describe "Uninstall dry run leftovers" {
         Uninstall-SelectedApps -Apps @($app)
 
         Should -Invoke Remove-SafeItem -Times 0 -Exactly
-        Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Invoke-MoleUninstallProcess -Times 0 -Exactly
     }
 
     It "Previews an app's own folder" {
@@ -717,7 +735,7 @@ Describe 'Leftover install folder ownership' {
         $script:Owners = @()
         Mock Get-MoleInstallOwners { @{ Complete = $true; Owners = $script:Owners } }
         Mock Get-UninstallLaunch { @{ FilePath = 'mock.exe'; Arguments = '' } }
-        Mock Start-Process { [pscustomobject]@{ ExitCode = 0 } }
+        Mock Invoke-MoleUninstallProcess { [pscustomobject]@{ ExitCode = 0 } }
         Mock Test-UninstallEntryGone { $true }
         Mock Remove-SafeItem { $true }
         Mock Write-Host {}
@@ -941,7 +959,7 @@ Describe "mo uninstall --list" {
         Mock Show-AppSelectionMenu { throw "--list must not open the menu" }
         Mock Read-Host { throw "--list must not prompt" }
         Mock Uninstall-SelectedApps { throw "--list must not uninstall" }
-        Mock Start-Process { throw "--list must not start a process" }
+        Mock Invoke-MoleUninstallProcess { throw "--list must not start a process" }
         Mock Remove-AppxPackage { throw "--list must not remove a package" }
         Mock Write-MoleOperation { throw "--list must not write operations.log" }
         Mock Add-MoleOperationText { throw "--list must not write operations.log" }
@@ -1042,7 +1060,7 @@ Describe "mo uninstall --list" {
     It "Never runs an uninstaller, prompts or writes the log" {
         $null = & { Set-StrictMode -Version Latest; Main }
 
-        Should -Invoke Start-Process -Times 0 -Exactly
+        Should -Invoke Invoke-MoleUninstallProcess -Times 0 -Exactly
         Should -Invoke Remove-AppxPackage -Times 0 -Exactly
         Should -Invoke Uninstall-SelectedApps -Times 0 -Exactly
         Should -Invoke Show-AppSelectionMenu -Times 0 -Exactly
