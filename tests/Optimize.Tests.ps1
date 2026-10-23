@@ -32,6 +32,23 @@ BeforeAll {
     function script:Repair-WindowsImage { param([switch]$Online, [switch]$CheckHealth, [switch]$RestoreHealth) }
 }
 
+Describe "Read-only system health queries" {
+    It "Collects health metrics in the current PowerShell host without query mocks" {
+        $health = Get-SystemHealth
+
+        $health.MemoryTotalGB | Should -BeGreaterThan 0
+        $health.MemoryUsedGB | Should -BeGreaterOrEqual 0
+        $health.MemoryUsedPercent | Should -BeGreaterOrEqual 0
+        $health.MemoryUsedPercent | Should -BeLessOrEqual 100
+        $health.DiskTotalGB | Should -BeGreaterThan 0
+        $health.DiskUsedPercent | Should -BeGreaterOrEqual 0
+        $health.DiskUsedPercent | Should -BeLessOrEqual 100
+        $health.UptimeDays | Should -BeGreaterOrEqual 0
+        $health.CPUName | Should -Not -BeNullOrEmpty
+        $health.CPUCores | Should -BeGreaterThan 0
+    }
+}
+
 Describe "mo optimize steps" {
     BeforeEach {
         $script:OptimizationsApplied = 0
