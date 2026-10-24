@@ -220,7 +220,6 @@ function Start-Cleanup {
     # Show system info
     $winVer = Get-WindowsVersion
     Write-Host "$esc[34m$($script:Icons.Admin)$esc[0m $($winVer.Name) | Free space: $(Get-FreeSpace)"
-    Write-Host ""
 
     # Reset stats
     Reset-CleanupStats
