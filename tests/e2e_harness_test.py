@@ -4,7 +4,9 @@ from contextlib import ExitStack, redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -162,6 +164,79 @@ class DeploymentTests(unittest.TestCase):
                 self.assertIsNotNone(error)
                 self.assertEqual(uploads, [])
                 remote.ps.assert_not_called()
+
+
+class LaunchTests(unittest.TestCase):
+    @staticmethod
+    def process_fixture(script, state):
+        # Execute the generated script, with no registry access or real processes.
+        return r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$script:owned = [pscustomobject]@{ Id = 101; ProcessName = 'WinMergeU'; HasExited = __EXITED__ }
+$script:bystander = [pscustomobject]@{ Id = 202; ProcessName = 'WinMergeU'; HasExited = $false }
+$script:stopped = @()
+function Get-ChildItem { [pscustomobject]@{ FullName = 'C:\fixture\WinMergeU.exe' } }
+function Start-Process { $script:owned }
+function Start-Sleep { }
+function Test-Path { $true }
+function Get-Process {
+    param($Name)
+    @($script:owned, $script:bystander) | Where-Object { $_.ProcessName -like $Name -and -not $_.HasExited }
+}
+function Stop-Process {
+    [CmdletBinding()]
+    param([Parameter(ValueFromPipeline = $true)]$InputObject, [switch]$Force)
+    process {
+        if ($null -eq $InputObject) { throw 'missing process object' }
+        if (__RACE__ -and $InputObject.Id -eq $script:owned.Id) {
+            $InputObject.HasExited = $true
+            Write-Error 'process already exited'
+            return
+        }
+        if ($InputObject.HasExited) { throw 'attempted to stop an exited process' }
+        $script:stopped += $InputObject.Id
+        $InputObject.HasExited = $true
+    }
+}
+$result = & {
+""".replace("__EXITED__", "$true" if state == "exited" else "$false").replace(
+            "__RACE__", "$true" if state == "race" else "$false") + script + r"""
+}
+[pscustomobject]@{ result = $result; stopped = @($script:stopped); bystanderAlive = -not $script:bystander.HasExited } |
+    ConvertTo-Json -Compress -Depth 4
+"""
+
+    @unittest.skipUnless(os.name == "nt", "generated PowerShell runs in Windows Validation")
+    def test_launch_only_stops_its_own_process_and_handles_exit(self):
+        shell = shutil.which("powershell")
+        self.assertIsNotNone(shell, "Windows PowerShell is required for the launch regression")
+        for state in ("running", "exited", "race"):
+            with self.subTest(state=state):
+                run = Mock(install_location=r"C:\fixture", info={})
+                receipts = []
+
+                def execute(script):
+                    encoded = E2E.base64.b64encode(self.process_fixture(script, state).encode("utf-16-le")).decode()
+                    result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, "")
+                    receipt = json.loads(result.stdout)
+                    receipts.append(receipt)
+                    return receipt["result"]
+
+                run.remote.ps_json.side_effect = execute
+                if state == "exited":
+                    with self.assertRaisesRegex(E2E.StepFailed, "exited right after launch"):
+                        E2E.launch(run)
+                    self.assertEqual(run.info, {})
+                else:
+                    self.assertEqual(E2E.launch(run), "ran 8s, wrote its settings")
+                    self.assertTrue(run.info["settings_after_launch"])
+                self.assertEqual(len(receipts), 1)
+                self.assertTrue(receipts[0]["bystanderAlive"])
+                self.assertEqual(receipts[0]["stopped"], [101] if state == "running" else [])
 
 
 if __name__ == "__main__":

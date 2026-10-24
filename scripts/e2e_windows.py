@@ -338,7 +338,7 @@ $exe = Get-ChildItem -LiteralPath '{run.install_location}' -Filter 'WinMerge*.ex
 $p = Start-Process -FilePath $exe.FullName -PassThru
 Start-Sleep -Seconds 8
 $alive = -not $p.HasExited
-Get-Process -Name 'WinMerge*' -ErrorAction SilentlyContinue | Stop-Process -Force
+if ($alive) {{ $p | Stop-Process -Force -ErrorAction SilentlyContinue }}
 Start-Sleep -Seconds 1
 [pscustomobject]@{{ ran = $alive; settings = Test-Path 'HKCU:\Software\Thingamahoochie\WinMerge' }}""")
     if not result["ran"]:
