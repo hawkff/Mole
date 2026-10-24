@@ -42,6 +42,7 @@ $script:MOLE_VER = Get-MoleVersionString -RootDir $script:MOLE_ROOT
 
 # Import core
 . "$script:MOLE_LIB\core\common.ps1"
+. "$script:MOLE_LIB\core\update_check.ps1"
 
 # ============================================================================
 # Version Info
@@ -191,6 +192,7 @@ function Show-MainHelp {
 # M for the full help, V for the version, Q to quit. Returns a command name,
 # "help", "version" or $null.
 function Show-MainMenu {
+    param($UpdateContext = $null)
     $items = @(
         @{ Command = "clean"; Label = "Clean        Free up disk space" },
         @{ Command = "uninstall"; Label = "Uninstall    Remove apps completely" },
@@ -221,6 +223,7 @@ function Show-MainMenu {
             }
             Write-Host ""
             Write-Host $controls
+            Show-MoleUpdateNotice -Context $UpdateContext
 
             $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             switch ($key.VirtualKeyCode) {
@@ -441,11 +444,16 @@ function Main {
     }
 
     # If command specified, route to it
+    $updateContext = $null
+    if (Test-MoleUpdateNoticeAllowed -CommandName $effectiveCommand -Arguments $effectiveArguments) {
+        $updateContext = Start-MoleUpdateCheck -RootDir $script:MOLE_ROOT -Version $script:MOLE_VER -Method (Get-MoleInstallMethod -RootDir $script:MOLE_ROOT)
+    }
     if ($effectiveCommand) {
         $validCommands = @("clean", "uninstall", "analyze", "status", "optimize", "purge", "history", "update", "remove")
 
         if ($effectiveCommand -in $validCommands) {
             Invoke-MoleCommand -CommandName $effectiveCommand -Arguments $effectiveArguments
+            if ($script:MoleExitCode -eq 0) { Show-MoleUpdateNotice -Context $updateContext }
         }
         else {
             $script:MoleExitCode = 2
@@ -458,7 +466,7 @@ function Main {
     }
 
     # Interactive mode, as on macOS: pick once, run it, return to the shell.
-    $choice = Show-MainMenu
+    $choice = Show-MainMenu -UpdateContext $updateContext
     Clear-Host
     if ($null -eq $choice) {
         return
@@ -471,6 +479,7 @@ function Main {
     }
     else {
         Invoke-MoleCommand -CommandName $choice -Arguments @()
+        if ($script:MoleExitCode -eq 0) { Show-MoleUpdateNotice -Context $updateContext }
     }
 }
 

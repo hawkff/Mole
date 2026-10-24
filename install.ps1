@@ -690,6 +690,7 @@ function Get-MoleInstallNestedFiles {
         "lib\core\log.ps1"
         "lib\core\tui_binaries.ps1"
         "lib\core\ui.ps1"
+        "lib\core\update_check.ps1"
         "lib\core\version.ps1"
         "packaging\README.md"
         "packaging\scoop\mole.json"
@@ -728,6 +729,7 @@ function Get-MoleInstallNestedFiles {
         "tests\UI.Tests.ps1"
         "tests\Uninstall.Tests.ps1"
         "tests\UninstallWait.Tests.ps1"
+        "tests\UpdateNotice.Tests.ps1"
     )
 }
 

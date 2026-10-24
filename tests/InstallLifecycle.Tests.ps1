@@ -286,6 +286,8 @@ Describe 'Native build replacement' {
 
 Describe 'Native File launcher routing' {
     BeforeAll {
+        . (Join-Path $script:RepoRoot 'lib\core\update_check.ps1')
+        function Test-MoleInteractiveOutput { $false }
         $entryAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:RepoRoot 'mole.ps1'), [ref]$null, [ref]$null)
         $main = $entryAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Main' }, $true)
         . ([scriptblock]::Create(($main.Extent.Text -replace '^function Main', 'function Invoke-RootRouting')))
@@ -298,6 +300,7 @@ Describe 'Native File launcher routing' {
     BeforeEach {
         $script:Command = ''
         $script:CommandArgs = $null
+        $script:MoleExitCode = 0
         $script:ShowHelp = $false
         $script:Version = $false
         Mock Initialize-Mole {}
