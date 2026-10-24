@@ -22,6 +22,45 @@ with patch.dict("sys.modules", {name: Mock() for name in ("fcntl", "pty", "termi
     SPEC.loader.exec_module(E2E)
 
 
+class RemoteTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "remote PowerShell runs in Windows Validation")
+    def test_candidate_command_uses_executable_despite_a_bare_name_collision(self):
+        shell = shutil.which("powershell.exe")
+        self.assertIsNotNone(shell)
+        with tempfile.TemporaryDirectory() as tmp:
+            entry = Path(tmp) / "mole.ps1"
+            entry.write_text('param([switch]$Version)\nWrite-Output "MOLE_FIXTURE:$Version"\n')
+            run = object.__new__(E2E.Run)
+            run.info = {"mole": str(entry)}
+            script = "$ErrorActionPreference = 'Stop'\nfunction powershell { throw 'bare shell collision' }\n& " + run.mole("--version")
+            encoded = E2E.base64.b64encode(script.encode("utf-16-le")).decode()
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "MOLE_FIXTURE:True")
+
+    @unittest.skipUnless(os.name == "nt", "remote PowerShell runs in Windows Validation")
+    def test_remote_output_survives_a_chinese_console_code_page(self):
+        shell = shutil.which("powershell.exe")
+        self.assertIsNotNone(shell)
+        remote = object.__new__(E2E.Remote)
+        remote.ssh = Mock(return_value=["mock-ssh"])
+        native_run = subprocess.run
+
+        def local_transport(argv, **kwargs):
+            # Execute the actual generated remote script under a legacy code
+            # page, without SSH or changing the machine's locale.
+            encoded = argv[-1].rsplit(" ", 1)[1]
+            script = "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(936)\n" + E2E.base64.b64decode(encoded).decode("utf-16-le")
+            encoded = E2E.base64.b64encode(script.encode("utf-16-le")).decode()
+            return native_run([shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], **kwargs)
+
+        with patch.object(E2E.subprocess, "run", side_effect=local_transport):
+            result = remote.ps("Write-Output '\u4e2d\u6587'", timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "\u4e2d\u6587")
+
+
 class DependencyTests(unittest.TestCase):
     def run_candidate(self, failed=None, keep_going=True, download_fixture=None):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
@@ -164,6 +203,38 @@ class DeploymentTests(unittest.TestCase):
                 self.assertIsNotNone(error)
                 self.assertEqual(uploads, [])
                 remote.ps.assert_not_called()
+
+    def test_failed_version_probe_keeps_the_actual_error(self):
+        _, _, _, _, error = self.deploy_fixture(version_code=1)
+        self.assertIn("version failed", str(error))
+
+
+class UninstallTests(unittest.TestCase):
+    def test_singular_selected_app_reaches_only_fixture_confirmation(self):
+        run = Mock(install_location=r"C:\fixture", info={})
+        run.remote.ssh.return_value = []
+        run.remote.ps_json.return_value = {"entries": 0, "folder": False, "settings": True}
+        run.oplog_since.return_value = "UNINSTALLED WinMerge"
+        term = Mock(buf=b"")
+        term.finish.return_value = 0
+        frames = iter((
+            "Select Applications to Uninstall", "Search:", "Search: WinMerge (1 matches)",
+            "Selected: 1 app (67.8MB)", "WinMerge\nContinue? (y/N)", "Uninstall complete",
+        ))
+
+        def expect(pattern, *_args, **_kwargs):
+            frame = next(frames)
+            term.buf += frame.encode()
+            match = E2E.re.search(pattern, frame)
+            self.assertIsNotNone(match, f"{pattern!r} did not match {frame!r}")
+            return match
+
+        term.expect.side_effect = expect
+        with patch.object(E2E, "Terminal", return_value=term):
+            self.assertIn("registry entry and install folder gone", E2E.uninstall(run))
+        self.assertIn(((b"y\r",), {}), term.send.call_args_list)
+        self.assertTrue(run.info["settings_after_uninstall"])
+        term.close.assert_called_once()
 
 
 class LaunchTests(unittest.TestCase):

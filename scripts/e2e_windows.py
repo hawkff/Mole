@@ -83,9 +83,11 @@ class Remote:
         return args + (["-tt"] if tty else []) + [self.target]
 
     def ps(self, script, timeout=900):
-        script = "$ProgressPreference = 'SilentlyContinue'\n" + script
+        script = ("$ProgressPreference = 'SilentlyContinue'\n"
+                  "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding\n"
+                  "$OutputEncoding = [Console]::OutputEncoding\n" + script)
         encoded = base64.b64encode(script.encode("utf-16-le")).decode()
-        return subprocess.run(self.ssh() + [f"powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"],
+        return subprocess.run(self.ssh() + [f"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"],
                               stdin=subprocess.DEVNULL, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=timeout)
 
@@ -215,7 +217,7 @@ class Run:
 
     def mole(self, *args):
         quoted = " ".join(f"'{a}'" for a in args)
-        return f"powershell -NoProfile -ExecutionPolicy Bypass -File '{self.info['mole']}' {quoted}"
+        return f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{self.info['mole']}' {quoted}"
 
     def oplog_offset(self):
         return self.remote.ps_json(r"""
@@ -292,7 +294,8 @@ Test-Path -LiteralPath '{run.info['mole']}'""")
     result = run.remote.ps(f"& {run.mole('--version')}")
     version = result.stdout.strip().splitlines()
     if result.returncode or not version:
-        raise StepFailed(f"candidate version probe failed ({result.returncode})")
+        detail = (result.stderr or result.stdout).strip()[-400:]
+        raise StepFailed(f"candidate version probe failed ({result.returncode}): {detail}")
     return f"{run.info['goarch']} tools, {version[0]}"
 
 
@@ -360,7 +363,7 @@ def uninstall(run):
             term.send(b"q")
             raise StepFailed(f"search matched {matches} apps; quit without selecting")
         term.send(b" ")
-        term.expect(r"Selected:\s*1 apps", 15)
+        term.expect(r"Selected:\s*1 app\b", 15)
         mark = len(term.buf)
         term.send(b"\r")
         term.expect(r"Continue\? \(y/N\)", 60, since=mark)

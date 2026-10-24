@@ -20,6 +20,8 @@ PowerShell pipelines unwrap a single result to a scalar. Keep a collection-shape
 
 ## Test isolation and false success
 
+The remote e2e runner names `powershell.exe` explicitly: PowerShell can resolve bare `powershell` to an unrelated extensionless file before the installed executable. Keep its output encoding local to the child session and aligned with the runner's UTF-8 decoder; a Chinese CP936 host otherwise corrupts JSON and transcripts. Preserve the actual error when a candidate version probe fails. `tests/e2e_harness_test.py` covers command-name collisions, legacy console encoding and failure details without changing the host locale.
+
 A global `git` function left by one Pester file can intercept later tests that need the real executable. A passing isolated file does not prove suite isolation. Keep mocks file-scoped, restore modified process environment in `finally` or teardown, and run the full suite after changes to shared mocks. [GitProxy.Tests.ps1](../tests/GitProxy.Tests.ps1) uses a local stub with Pester-managed mocks.
 
 For process-tree timeout fixtures, have the parent record the spawned child PID immediately. Waiting for a cold child PowerShell to write its own PID can fail on CI even when cancellation works. Keep a positive child-existence assertion, verify termination, and bound fixture cleanup by both PID and start time; do not change production timeouts to accommodate the harness.
