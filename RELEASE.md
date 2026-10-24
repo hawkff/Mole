@@ -50,9 +50,11 @@ If the Windows machine has no `gh`, download and upload the files from another m
 
 ## 4. Publish
 
+Every release title includes the version tag and a short codename, including Windows releases and prereleases.
+
 ```powershell
 gh release upload V1.31.0-windows C:\mole-release\* --repo tw93/Mole --clobber
-gh release edit V1.31.0-windows --repo tw93/Mole --draft=false --latest=false
+gh release edit V1.31.0-windows --repo tw93/Mole --title "V1.31.0-windows <CodeName>" --draft=false --latest=false
 ```
 
 Right after publishing, add the six standard reactions as the maintainer, the same set every macOS release gets:
