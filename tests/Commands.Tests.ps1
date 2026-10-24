@@ -363,25 +363,39 @@ Describe "Main Entry Point" {
         }
 
         It "Renders the full menu before waiting for input" {
-            $job = Start-Job -ScriptBlock {
-                param($molePath)
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $molePath 2>&1
-            } -ArgumentList $script:MolePath
+            # Receive-Job also inspects Workflow adapters on Windows PowerShell
+            # 5.1, whose unrelated persistence store can fail before menu output.
+            $start = New-Object System.Diagnostics.ProcessStartInfo
+            $start.FileName = 'powershell.exe'
+            $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $script:MolePath + '"'
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $process = [Diagnostics.Process]::Start($start)
             try {
                 $deadline = (Get-Date).AddSeconds(15)
                 $output = ''
+                $stderr = $process.StandardError.ReadToEndAsync()
+                $line = $process.StandardOutput.ReadLineAsync()
                 do {
-                    $output = Receive-Job $job -Keep 2>&1 | Out-String
-                    if ($output -match 'Q Quit' -or $job.State -in @('Completed', 'Failed')) { break }
-                    Start-Sleep -Milliseconds 100
+                    if ($line.IsCompleted) {
+                        if ($null -eq $line.Result) { break }
+                        $output += $line.Result + "`n"
+                        if ($output -match 'Q Quit') { break }
+                        $line = $process.StandardOutput.ReadLineAsync()
+                    }
+                    else { Start-Sleep -Milliseconds 20 }
                 } while ((Get-Date) -lt $deadline)
                 $output | Should -Match 'Q Quit'
                 $output | Should -Match 'Free up disk space'
                 $output | Should -Not -Match $script:VisualDefaultsErrorPattern
             }
             finally {
-                Stop-Job $job -ErrorAction SilentlyContinue
-                Remove-Job $job -Force -ErrorAction SilentlyContinue
+                if (-not $process.HasExited) { $process.Kill() }
+                $process.WaitForExit(5000) | Should -BeTrue
+                if ($stderr.IsCompleted) { $stderr.Result | Should -Not -Match $script:VisualDefaultsErrorPattern }
+                $process.Dispose()
             }
         }
 
