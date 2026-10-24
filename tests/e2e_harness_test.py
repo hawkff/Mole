@@ -60,6 +60,69 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "\u4e2d\u6587")
 
+    @unittest.skipUnless(os.name == "nt", "remote PowerShell runs in Windows Validation")
+    def test_terminal_shells_preserve_literal_paths_arguments_and_exit_codes(self):
+        powershell = shutil.which("powershell.exe")
+        cmd = shutil.which("cmd.exe")
+        self.assertIsNotNone(powershell)
+        self.assertIsNotNone(cmd)
+        values = ["plain", "two words", "O'Brien", "$env:USERNAME", "100%PATH%", "a`b", "semi; & | (x)", "tail\\"]
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Bob's tools $cash & 100% path"
+            folder.mkdir()
+            entry = folder / "mole fixture.ps1"
+            entry.write_text('param([int]$Code, [Parameter(ValueFromRemainingArguments=$true)][string[]]$Values)\n'
+                             'ConvertTo-Json -InputObject @($Values) -Compress\nexit $Code\n')
+            run = object.__new__(E2E.Run)
+            run.info = {"mole": str(entry)}
+            run.token = "fixture-command-status"
+            for shell, prefix in (("cmd", [cmd, "/d", "/s", "/c"]),
+                                  ("powershell", [powershell, "-NoProfile", "-NonInteractive", "-Command"])):
+                for code in (0, 37):
+                    with self.subTest(shell=shell, code=code):
+                        result = subprocess.run(prefix + [run.mole(str(code), *values, terminal=True)],
+                                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+                        # PowerShell's -Command shell maps a nonzero native exit
+                        # to 1; the per-run marker must retain the original code.
+                        self.assertEqual(result.returncode, code if shell == "cmd" else int(code != 0), result.stderr)
+                        lines = [line for line in result.stdout.splitlines() if line.strip()]
+                        self.assertEqual(json.loads(lines[0]), values)
+                        self.assertEqual(lines[-1], f"MOLE_EXIT={run.token}:{code}")
+
+
+class TerminalTests(unittest.TestCase):
+    def terminal(self, output, transport_code=0):
+        term = object.__new__(E2E.Terminal)
+        term.exit_marker = "MOLE_EXIT=current-run:"
+        term.buf = output.encode()
+        term.proc = Mock(returncode=transport_code)
+        term.proc.poll.return_value = transport_code
+        term._pump = Mock(return_value=False)
+        return term
+
+    def test_finish_requires_this_runs_marker_not_ssh_success(self):
+        for output in ("", "MOLE_EXIT=old-run:0\n", "MOLE_EXIT=current-run:unknown\n"):
+            with self.subTest(output=output):
+                with self.assertRaisesRegex(E2E.StepFailed, "without this run's command status"):
+                    self.terminal(output).finish(1)
+        self.assertEqual(self.terminal("MOLE_EXIT=old-run:37\nMOLE_EXIT=current-run:0\n").finish(1), 0)
+        # ConPTY can encode a preceding newline as a cursor move, which plain()
+        # strips; the completion marker can follow earlier output directly.
+        self.assertEqual(self.terminal("previous outputMOLE_EXIT=current-run:0\n").finish(1), 0)
+
+    def test_finish_rejects_actual_failure_even_when_ssh_returns_zero(self):
+        with self.assertRaisesRegex(E2E.StepFailed, "exited 37"):
+            self.terminal("MOLE_EXIT=current-run:37\n").finish(1)
+        with self.assertRaisesRegex(E2E.StepFailed, "ssh exited 255"):
+            self.terminal("MOLE_EXIT=current-run:0\n", 255).finish(1)
+
+    def test_finish_keeps_its_timeout_boundary(self):
+        term = self.terminal("")
+        term.proc.poll.return_value = None
+        with patch.object(E2E.time, "monotonic", side_effect=[0, 2]):
+            with self.assertRaisesRegex(E2E.StepFailed, "still running"):
+                term.finish(1)
+
 
 class DependencyTests(unittest.TestCase):
     def run_candidate(self, failed=None, keep_going=True, download_fixture=None):

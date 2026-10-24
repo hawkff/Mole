@@ -110,11 +110,12 @@ class Remote:
 class Terminal:
     """One remote command on a local pseudo-terminal carried by ssh -tt."""
 
-    def __init__(self, argv, log_path, cols=160, rows=48):
+    def __init__(self, argv, log_path, exit_token, cols=160, rows=48):
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.buf = b""
         self.log_path = log_path
+        self.exit_marker = f"MOLE_EXIT={exit_token}:"
 
         def own_terminal():
             os.setsid()
@@ -163,7 +164,15 @@ class Terminal:
             self._pump(0.05)
         while self._pump(0.05):
             pass
-        return self.proc.returncode
+        codes = re.findall(re.escape(self.exit_marker) + r"(-?\d+)(?:\n|$)", plain(self.buf))
+        if not codes:
+            raise StepFailed("terminal ended without this run's command status; inspect its transcript")
+        code = int(codes[-1])
+        if code:
+            raise StepFailed(f"remote Mole command exited {code}")
+        if self.proc.returncode:
+            raise StepFailed(f"ssh exited {self.proc.returncode} after the command status")
+        return 0
 
     def close(self):
         if self.proc.poll() is None:
@@ -215,9 +224,23 @@ class Run:
     def log(self, name):
         return self.dir / f"{len(self.steps) + 1:02d}-{name}.log"
 
-    def mole(self, *args):
-        quoted = " ".join(f"'{a}'" for a in args)
-        return f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{self.info['mole']}' {quoted}"
+    def mole(self, *args, terminal=False):
+        quoted = " ".join("'" + value.replace("'", "''") + "'" for value in (self.info["mole"], *args))
+        # Only ASCII command syntax crosses the SSH shell. The inner process
+        # retains -File parameter binding and its native exit status.
+        script = ("$ErrorActionPreference = 'Stop'\n"
+                  f"& powershell.exe -NoProfile -ExecutionPolicy Bypass -File {quoted}\n")
+        if terminal:
+            # Windows OpenSSH can return zero for every ConPTY command. Keep
+            # the actual -File exit code in this run's transcript instead.
+            script += ("$moleExit = $LASTEXITCODE\n"
+                       "[Console]::Out.WriteLine('')\n"
+                       f"[Console]::Out.WriteLine('MOLE_EXIT={self.token}:' + $moleExit)\n"
+                       "exit $moleExit")
+        else:
+            script += "exit $LASTEXITCODE"
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+        return f"powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
 
     def oplog_offset(self):
         return self.remote.ps_json(r"""
@@ -352,7 +375,7 @@ Start-Sleep -Seconds 1
 
 def uninstall(run):
     offset = run.oplog_offset()
-    term = Terminal(run.remote.ssh(tty=True) + [run.mole("uninstall")], run.log("uninstall"))
+    term = Terminal(run.remote.ssh(tty=True) + [run.mole("uninstall", terminal=True)], run.log("uninstall"), run.token)
     try:
         term.expect(r"Select Applications to Uninstall", 300)
         term.send(b"/")
@@ -401,7 +424,7 @@ def history(run):
 def analyze(run):
     offset = run.oplog_offset()
     name = run.setup.rsplit("\\", 1)[1]
-    term = Terminal(run.remote.ssh(tty=True) + [run.mole("analyze", f"{run.info['profile']}\\Downloads")], run.log("analyze"))
+    term = Terminal(run.remote.ssh(tty=True) + [run.mole("analyze", f"{run.info['profile']}\\Downloads", terminal=True)], run.log("analyze"), run.token)
     try:
         term.expect(re.escape(name[:40]), 300)
         quiet_since = time.monotonic()
