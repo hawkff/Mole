@@ -14,6 +14,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptDir\..\core\log.ps1"
 . "$scriptDir\..\core\file_ops.ps1"
 
+. "$PSScriptRoot\cache_guard.ps1"
+
 # ============================================================================
 # Node.js / JavaScript Ecosystem
 # ============================================================================
@@ -243,8 +245,8 @@ function Clear-PythonCaches {
     
     # Poetry cache
     $poetryCachePath = "$env:LOCALAPPDATA\pypoetry\Cache"
-    if (Test-Path $poetryCachePath) {
-        Clear-DirectoryContents -Path $poetryCachePath -Description "Poetry cache"
+    foreach ($leaf in @('artifacts', 'cache')) {
+        Clear-MoleAppCache -Path (Join-Path $poetryCachePath $leaf) -Description "Poetry cache" -Processes @('python', 'pythonw', 'poetry')
     }
     
     # conda packages

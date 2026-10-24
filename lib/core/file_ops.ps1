@@ -377,6 +377,13 @@ function Format-MoleTreeRemovalDetail {
     return $detail
 }
 
+function Test-MoleRemovalCondition {
+    param([scriptblock]$CanRemove)
+    if ($null -eq $CanRemove) { return $true }
+    try { return [bool](& $CanRemove) }
+    catch { return $false }
+}
+
 function Remove-SafeDirectoryTree {
     <#
     .SYNOPSIS
@@ -394,7 +401,8 @@ function Remove-SafeDirectoryTree {
         # The whitelist the caller read for this removal. Without one the tree
         # reads it once here; resolving every rule again for each child made a
         # large cache folder pay one filesystem lookup per rule per entry.
-        $WhitelistState = $null
+        $WhitelistState = $null,
+        [scriptblock]$CanRemove = $null
     )
 
     if ($null -eq $Report) { $Report = @{} }
@@ -402,6 +410,7 @@ function Remove-SafeDirectoryTree {
     $Report.Removed = 0
     $Report.Total = 0
     $Report.Reason = ""
+    $Report.OwnerHeld = $false
     $tree = if ($null -ne $ValidatedTree) {
         $ValidatedTree
     }
@@ -420,6 +429,12 @@ function Remove-SafeDirectoryTree {
         $orderedItems = @($tree.Items | Sort-Object { $_.FullName.Length } -Descending)
     }
     $Report.Total = $orderedItems.Count
+
+    if (-not (Test-MoleRemovalCondition $CanRemove)) {
+        $Report.Reason = "refused: cache owner is active or unknown"
+        $Report.OwnerHeld = $true
+        return $false
+    }
 
     foreach ($item in $orderedItems) {
         try {
@@ -673,7 +688,8 @@ function Remove-SafeItems {
         [Parameter(Mandatory)]
         [string[]]$Paths,
         
-        [string]$Description = "Items"
+        [string]$Description = "Items",
+        [scriptblock]$CanRemove = $null
     )
     
     $totalSize = 0
@@ -710,6 +726,8 @@ function Remove-SafeItems {
         $size = if ($null -ne $validatedTree) { Get-ValidatedTreeSize -Tree $validatedTree } else { Get-PathSize -Path $path }
         if (-not (Test-SafePath $path -WhitelistState $whitelistState) -or -not (Test-MolePathSnapshot $pathSnapshot)) { continue }
 
+        if (-not (Test-MoleRemovalCondition $CanRemove)) { continue }
+
         if ($script:MoleDryRunMode) {
             $totalSize += $size
             $removedCount++
@@ -720,7 +738,11 @@ function Remove-SafeItems {
         try {
             if ($isDirectory) {
                 $treeReport = @{}
-                if (-not (Remove-SafeDirectoryTree -Path $path -ValidatedTree $validatedTree -Report $treeReport -WhitelistState $whitelistState)) {
+                if (-not (Remove-SafeDirectoryTree -Path $path -ValidatedTree $validatedTree -Report $treeReport -WhitelistState $whitelistState -CanRemove $CanRemove)) {
+                    if ($treeReport['OwnerHeld']) {
+                        Write-MoleOperation -Action "SKIPPED" -Path $path -Detail $treeReport.Reason
+                        continue
+                    }
                     $failedCount++
                     Write-MoleOperation -Action "FAILED" -Path $path -Detail (Format-MoleTreeRemovalDetail $treeReport)
                     continue
@@ -824,7 +846,8 @@ function Clear-DirectoryContents {
         [Parameter(Mandatory)]
         [string]$Path,
         
-        [string]$Description = ""
+        [string]$Description = "",
+        [scriptblock]$CanRemove = $null
     )
     
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -835,13 +858,16 @@ function Clear-DirectoryContents {
         return
     }
     
+    if (-not (Test-MoleRemovalCondition $CanRemove)) { return }
+
     $rootSnapshot = Get-MolePathSnapshot -Path $Path
     if (-not $rootSnapshot) { return }
-    $items = Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    try { $items = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop) }
+    catch { return }
     if ($items -and (Test-MolePathSnapshot $rootSnapshot)) {
         $paths = $items | ForEach-Object { $_.FullName }
         $desc = if ($Description) { $Description } else { Split-Path -Leaf $Path }
-        Remove-SafeItems -Paths $paths -Description $desc
+        Remove-SafeItems -Paths $paths -Description $desc -CanRemove $CanRemove
     }
 }
 

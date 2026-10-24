@@ -15,6 +15,12 @@ Implemented (source, unreleased): `bin/uninstall.ps1:Invoke-MoleUninstallProcess
 
 Mole CLI (macOS) `fb920811` addresses its two Optimize service signals through launchd rather than process names. Mole CLI (Windows) has no matching system-host restart, so that implementation is Not applicable here.
 
+## 2026-10-24 Application cache coverage and protection
+
+Follow-up to CLI-SYNC-01 and CLI-SYNC-04, implemented in source. Mole CLI (Windows) started at `6ae4e8c0`; the app-owned comparison confirmed the Windows GUI already has the relevant cache and owner boundaries. `lib/clean/caches.ps1`, `lib/clean/dev.ps1`, `lib/clean/cache_guard.ps1` and the shared path/removal guards now preserve Poetry virtualenvs and offline Service Worker CacheStorage, cover Chromium profiles and Firefox's Local caches, and select exact new Teams, Cursor, Windsurf, Obsidian and Notion disk-cache leaves. Running/unknown owners, locks, user exclusions and linked paths retain candidates. Existing VS Code and legacy browser cache targets remain supported.
+
+Mole for Windows is Implemented for these behaviors and needs no production change from this batch. Its self-updater and CLI-SYNC-16's separate uninstall inventory follow-up are outside this cleanup batch. Windows filesystem layouts are Not applicable to Mole CLI (macOS) and Mole Mac. [The development record](docs/development-record.md) owns native test evidence; this batch does not publish a package or change a version.
+
 ## CLI adaptation queue
 
 | ID | Topic | Status | Source, destination and next check |

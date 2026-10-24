@@ -13,6 +13,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptDir\..\core\base.ps1"
 . "$scriptDir\..\core\log.ps1"
 . "$scriptDir\..\core\file_ops.ps1"
+. "$PSScriptRoot\cache_guard.ps1"
 
 # ============================================================================
 # Browser Caches
@@ -26,67 +27,46 @@ function Clear-BrowserCaches {
     
     Start-Section "Browser caches"
     
-    # Chrome
-    $chromeCachePaths = @(
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache"
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache"
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\GPUCache"
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Service Worker\CacheStorage"
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\ShaderCache"
-        "$env:LOCALAPPDATA\Google\Chrome\User Data\GrShaderCache"
+    $browsers = @(
+        @{ Name = 'Chrome'; Root = 'Google\Chrome\User Data'; Processes = @('chrome'); RootCaches = @('ShaderCache', 'GrShaderCache') }
+        @{ Name = 'Edge'; Root = 'Microsoft\Edge\User Data'; Processes = @('msedge'); RootCaches = @('ShaderCache') }
+        @{ Name = 'Brave'; Root = 'BraveSoftware\Brave-Browser\User Data'; Processes = @('brave'); RootCaches = @() }
+        @{ Name = 'Vivaldi'; Root = 'Vivaldi\User Data'; Processes = @('vivaldi'); RootCaches = @() }
     )
-    
-    foreach ($path in $chromeCachePaths) {
-        if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "Chrome $(Split-Path -Leaf $path)"
+    foreach ($browser in $browsers) {
+        $root = Join-Path $env:LOCALAPPDATA $browser.Root
+        $lock = Join-Path $root 'lockfile'
+        foreach ($profile in @(Get-MoleCacheProfiles $root)) {
+            foreach ($leaf in @('Cache', 'Code Cache', 'GPUCache')) {
+                Clear-MoleAppCache -Path (Join-Path $profile.FullName $leaf) -Description "$($browser.Name) $leaf" -Processes $browser.Processes -LockPath $lock
+            }
+        }
+        foreach ($leaf in $browser.RootCaches) {
+            Clear-MoleAppCache -Path (Join-Path $root $leaf) -Description "$($browser.Name) $leaf" -Processes $browser.Processes -LockPath $lock
         }
     }
-    
-    # Edge
-    $edgeCachePaths = @(
-        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache"
-        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache"
-        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\GPUCache"
-        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Service Worker\CacheStorage"
-        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\ShaderCache"
-    )
-    
-    foreach ($path in $edgeCachePaths) {
-        if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "Edge $(Split-Path -Leaf $path)"
+
+    # Firefox's disk/startup caches live in Local, not its roaming profile store.
+    foreach ($profile in @(Get-MoleCacheProfiles "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles")) {
+        foreach ($leaf in @('cache2', 'startupCache')) {
+            $lock = "$env:APPDATA\Mozilla\Firefox\Profiles\$($profile.Name)\parent.lock"
+            Clear-MoleAppCache -Path (Join-Path $profile.FullName $leaf) -Description 'Firefox cache' -Processes @('firefox') -LockPath $lock
         }
     }
-    
-    # Firefox
-    $firefoxProfiles = "$env:APPDATA\Mozilla\Firefox\Profiles"
-    if (Test-Path $firefoxProfiles) {
-        $profiles = Get-ChildItem -Path $firefoxProfiles -Directory -ErrorAction SilentlyContinue
+    foreach ($profile in @(Get-MoleCacheProfiles "$env:APPDATA\Mozilla\Firefox\Profiles")) {
+        Clear-MoleAppCache -Path (Join-Path $profile.FullName 'shader-cache') -Description 'Firefox cache' -Processes @('firefox') -LockPath (Join-Path $profile.FullName 'parent.lock')
+    }
+
+    # Keep Opera's legacy root layout and its newer Default/profile layout.
+    foreach ($root in @("$env:APPDATA\Opera Software\Opera Stable", "$env:LOCALAPPDATA\Opera Software\Opera Stable")) {
+        $profiles = @($root) + @(Get-MoleCacheProfiles $root | ForEach-Object { $_.FullName })
         foreach ($profile in $profiles) {
-            $firefoxCachePaths = @(
-                "$($profile.FullName)\cache2"
-                "$($profile.FullName)\startupCache"
-                "$($profile.FullName)\shader-cache"
-            )
-            foreach ($path in $firefoxCachePaths) {
-                if (Test-Path $path) {
-                    Clear-DirectoryContents -Path $path -Description "Firefox cache"
-                }
+            foreach ($leaf in @('Cache', 'Code Cache', 'GPUCache')) {
+                Clear-MoleAppCache -Path (Join-Path $profile $leaf) -Description 'Opera cache' -Processes @('opera') -LockPath (Join-Path $root 'lockfile')
             }
         }
     }
-    
-    # Brave
-    $braveCachePath = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\Cache"
-    if (Test-Path $braveCachePath) {
-        Clear-DirectoryContents -Path $braveCachePath -Description "Brave cache"
-    }
-    
-    # Opera
-    $operaCachePath = "$env:APPDATA\Opera Software\Opera Stable\Cache"
-    if (Test-Path $operaCachePath) {
-        Clear-DirectoryContents -Path $operaCachePath -Description "Opera cache"
-    }
-    
+
     Stop-Section
 }
 
@@ -112,7 +92,7 @@ function Clear-AppCaches {
     )
     foreach ($path in $discordCachePaths) {
         if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "Discord cache"
+            Clear-MoleAppCache -Path $path -Description "Discord cache" -Processes @('discord')
         }
     }
     
@@ -121,11 +101,10 @@ function Clear-AppCaches {
         "$env:APPDATA\Slack\Cache"
         "$env:APPDATA\Slack\Code Cache"
         "$env:APPDATA\Slack\GPUCache"
-        "$env:APPDATA\Slack\Service Worker\CacheStorage"
     )
     foreach ($path in $slackCachePaths) {
         if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "Slack cache"
+            Clear-MoleAppCache -Path $path -Description "Slack cache" -Processes @('slack')
         }
     }
     
@@ -136,10 +115,24 @@ function Clear-AppCaches {
     )
     foreach ($path in $teamsCachePaths) {
         if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "Teams cache"
+            Clear-MoleAppCache -Path $path -Description "Teams cache" -Processes @('Teams')
         }
     }
     
+    # New Teams: only named WebView disk-cache leaves, never the package root.
+    $teamsRoot = "$env:LOCALAPPDATA\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView"
+    foreach ($profile in @(Get-MoleCacheProfiles $teamsRoot)) {
+        foreach ($leaf in @('Cache', 'Code Cache', 'GPUCache')) {
+            Clear-MoleAppCache -Path (Join-Path $profile.FullName $leaf) -Description 'Teams cache' -Processes @('ms-teams') -LockPath (Join-Path $teamsRoot 'lockfile')
+        }
+    }
+
+    foreach ($app in @('Cursor', 'Windsurf', 'Obsidian', 'Notion')) {
+        foreach ($leaf in @('Cache', 'Code Cache', 'GPUCache')) {
+            Clear-MoleAppCache -Path "$env:APPDATA\$app\$leaf" -Description "$app cache" -Processes @($app)
+        }
+    }
+
     # VS Code
     $vscodeCachePaths = @(
         "$env:APPDATA\Code\Cache"
@@ -151,7 +144,7 @@ function Clear-AppCaches {
     )
     foreach ($path in $vscodeCachePaths) {
         if (Test-Path $path) {
-            Clear-DirectoryContents -Path $path -Description "VS Code cache"
+            Clear-MoleAppCache -Path $path -Description "VS Code cache" -Processes @('Code')
         }
     }
     

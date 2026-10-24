@@ -169,7 +169,6 @@ $script:DefaultWhitelistPatterns = @(
     "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"     # Windows Explorer cache
     "$env:LOCALAPPDATA\Microsoft\Windows\Fonts"        # User fonts
     "$env:APPDATA\Microsoft\Windows\Recent"            # Recent files (used by shell)
-    "$env:LOCALAPPDATA\Packages\*"                     # UWP app data
     "$env:USERPROFILE\.vscode\extensions"              # VS Code extensions
     "$env:USERPROFILE\.nuget"                          # NuGet packages
     "$env:USERPROFILE\.cargo"                          # Rust packages
@@ -234,6 +233,8 @@ $script:CleanProtectedPathSegments = @(
     "Sessions"
     "Local Extension Settings"
     "Sync Data"
+    "Service Worker\CacheStorage"
+    "pypoetry\Cache\virtualenvs"
     "User\History"
     ".claude\projects"
     ".claude\file-history"
@@ -472,6 +473,18 @@ function Test-MoleProtectedPathForm {
     if ($script:MoleCleanPathGuard -and
         (Test-PathHasSegment -NormalizedPath $normalizedPath -Segments $script:CleanProtectedPathSegments)) {
         return $true
+    }
+
+    # UWP data stays protected. Only automatic clean may reach the named Teams
+    # WebView profile's three disposable leaves; user whitelist rules still win.
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        foreach ($packages in (Get-MoleProtectedPathForms -Protected (Join-Path $env:LOCALAPPDATA 'Packages'))) {
+            if ($normalizedPath -eq $packages -or $normalizedPath.StartsWith($packages + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $relative = $normalizedPath.Substring($packages.Length)
+                $teamsCache = '^\\MSTeams_8wekyb3d8bbwe\\LocalCache\\Microsoft\\MSTeams\\EBWebView\\[^\\]+\\(Cache|Code Cache|GPUCache)(\\|$)'
+                if (-not $script:MoleCleanPathGuard -or $relative -notmatch $teamsCache) { return $true }
+            }
+        }
     }
 
     foreach ($protected in $script:ExactProtectedPaths) {

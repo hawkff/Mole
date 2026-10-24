@@ -2,6 +2,19 @@
 
 This is the handoff record for the `windows` branch of `tw93/Mole`, not the paid Windows app or the macOS CLI. Read [AGENTS.md](../AGENTS.md) for current policy and [development pitfalls](development-pitfalls.md) for reusable lessons. Git history retains individual edits; this file records completed batches and their delivery boundaries. Recheck live state before resuming work.
 
+## 2026-10-24: Application cache coverage and protection
+
+From `6ae4e8c0`, this batch completes the five agreed Windows cleanup changes: preserve Poetry virtualenvs, retain offline Service Worker CacheStorage, cover Chromium profiles and Firefox Local caches, add exact new Teams WebView disk-cache leaves, and add Cursor/Windsurf/Obsidian/Notion disk caches. Existing browser shader, classic Teams and VS Code targets remain supported. The shared app-cache guard retains running/unknown owners and held/unknown lock files, checks again after sizing, and respects user exclusions and file identities. Packages stay protected apart from the exact Teams cache leaves during clean. No new flags or settings.
+
+Verification on an isolated Windows 11 VM:
+
+- The unchanged baseline failed both preservation regressions: Poetry's virtualenv interpreter and Slack's offline CacheStorage canary were removed. The neighboring disposable caches were positive controls.
+- Final `scripts/test.ps1 -NoGo` passed all 622 tests on Windows PowerShell 5.1.26100.9711 and PowerShell 7.6.8 with Pester 6.2.0, zero failed and zero skipped on both. Both engines parsed all 58 PowerShell files. This includes 26 new cache tests covering real fixture deletion, preview parity, owner changes during sizing and at the final sink, native process evidence, real file locks, profile junctions, incomplete/oversized profile scans, user exclusions and protected data. Installer inventory includes the new helper and test file.
+- The first full 5.1 run exposed an unrelated menu-test dependency on Workflow job adapters. It also failed against the unchanged baseline; the menu-only test passed. The menu test now owns one native process and bounded stream/exit cleanup, keeping its output assertions. The final full runs above include that test correction.
+- The Python e2e orchestration tests passed on macOS: 18 tests, four platform-specific skips. No real uninstall or installed-app cleanup was part of this batch.
+
+Mole for Windows already implements these five behaviors; its owner record was updated without app production changes. The macOS products and the app self-updater are outside this batch. These are source and fixture-test receipts, not a new signed package, physical-machine acceptance or release. Fresh owner/path checks remain observations rather than an atomic ownership lease; see [the security review](../SECURITY_AUDIT.md).
+
 ## 2026-10-13: Windows CLI review fixes
 
 All ten findings in this batch were fixed and pushed to `windows`. No tag, version bump or release was part of this batch.
