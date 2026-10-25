@@ -2,6 +2,14 @@
 
 This is the handoff record for the `windows` branch of `tw93/Mole`, not the paid Windows app or the macOS CLI. Read [AGENTS.md](../AGENTS.md) for current policy and [development pitfalls](development-pitfalls.md) for reusable lessons. Git history retains individual edits; this file records completed batches and their delivery boundaries. Recheck live state before resuming work.
 
+## 2026-10-25: V1.39.0-windows release preparation
+
+Candidate `b04cb5acfb04337c49c89b51912b81fedcda8890` sets both version sources to 1.39.0. Check and [Validation](https://github.com/tw93/Mole/actions/runs/40184116641) passed at that exact commit, including PowerShell 5.1, PowerShell 7, security and build jobs. The incremental GUI comparison found no additional production fix missing from the CLI. Private catalogs, GUI elevation and visualization, persistent monitoring and third-party application updates remain intentional differences; Mole self-update retains its existing scope.
+
+The authorized `scripts/e2e_windows.py` run on the Windows 11 ARM64 Parallels VM passed all nine steps and 15 smoke commands. The verified disposable WinMerge fixture launched, uninstalled with its registration and install directory gone, and its installer reached the Recycle Bin through Analyze. The final fixture remainder list was empty. This is native acceptance of the archived candidate source, not proof of a signed public x64 package.
+
+ThinkPad acceptance did not start: the configured SSH connection timed out twice, so retries stopped without changing networking. Restore connectivity before resuming that gate. No V1.39.0-windows tag, draft or public release was created. Signing, public asset verification and package/self-update acceptance remain pending, and the published Windows stable stays V1.38.0-windows. The parallel macOS release is V1.64.0; Windows publication must continue to use `make_latest: false`.
+
 ## 2026-10-25: Follow-up on registered identity and unknown health
 
 Implementation commits: `87f26494` (uninstall), `ebc7e23a` (optimization), `c0945edc` (status). Re-review of `9c408d72` separated registered directory identity from leftover-removal eligibility. Retained game content, Steam libraries and shared/system roots no longer erase normalized registration paths and collapse distinct installations during merging. Recursive display measurement keeps its separate static path restrictions; content and current-owner protection remain in the preview/final leftover guard. App-cache v6 invalidates the old identities and protected Store rows, including the router's cached-list fixture.
