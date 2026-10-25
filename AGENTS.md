@@ -28,11 +28,11 @@ Changes that come to this branch from the paid app:
 
 Changes that stay out:
 
-- GUI-only capabilities: app updates through winget, startup management, Doctor, tray, the treemap and MFT-based Analyze, deeper Status metrics, AI cleanup.
+- GUI-only capabilities: third-party app updates, startup management, Doctor, tray, the treemap and MFT-based Analyze, deeper Status metrics, AI cleanup.
 - The elevated batch protocol.
 - The measured per-app uninstall leftover catalog.
 
-A feature request asking for one of those gets a short "not planned for the CLI" answer, not a port. Fixes found here, including community PRs, are an input for the paid app; route them through `SYNC.md`; keep private app implementation details in the app-owned record.
+A feature request asking for one of those gets a short "not planned for the CLI" answer, not a port. `mo update` remains Mole self-update; do not add package-manager upgrade wrappers or upgrade apps from `mo optimize` (maintainer decision 2026-10-25; rationale in `SYNC.md`, CLI-SYNC-08). Fixes found here, including community PRs, are an input for the paid app; route them through `SYNC.md`; keep private app implementation details in the app-owned record.
 
 ## Development continuity
 
