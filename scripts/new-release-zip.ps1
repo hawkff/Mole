@@ -21,7 +21,7 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$root = (Resolve-Path -LiteralPath $SourceDir).Path.TrimEnd('\')
+$root = (Resolve-Path -LiteralPath $SourceDir).ProviderPath.TrimEnd('\')
 if (Test-Path -LiteralPath $Destination) {
     Remove-Item -LiteralPath $Destination -Force
 }

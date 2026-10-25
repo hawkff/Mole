@@ -6,6 +6,40 @@ BeforeAll {
     $script:ScriptsDir = Join-Path $script:WindowsDir "scripts"
 }
 
+Describe "Release filesystem paths" {
+    It "Passes a native filesystem path to consumers in <ScriptName>" -ForEach @(
+        @{ ScriptName = "sign-release.ps1"; Variable = "assetDir" },
+        @{ ScriptName = "new-release-zip.ps1"; Variable = "root" }
+    ) {
+        $native = Join-Path $TestDrive "native-path"
+        New-Item -ItemType Directory -Path $native -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $native "payload.txt"), "payload")
+        # UNC resolution can return a provider-qualified Path, which native
+        # executables and System.IO cannot consume. Model that resolved value.
+        Mock Resolve-Path {
+            [pscustomobject]@{
+                Path = "Microsoft.PowerShell.Core\FileSystem::$native"
+                ProviderPath = $native
+            }
+        }
+        $Path = $native
+        $SourceDir = $native
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:ScriptsDir $ScriptName), [ref]$null, [ref]$null)
+        $assignments = @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $node.Left.VariablePath.UserPath -eq $Variable
+        }, $true))
+        $assignments.Count | Should -Be 1
+        . ([scriptblock]::Create($assignments[0].Extent.Text))
+        $resolved = Get-Variable -Name $Variable -ValueOnly
+        $resolved | Should -BeExactly $native
+        [IO.File]::ReadAllText((Join-Path $resolved "payload.txt")) | Should -Be "payload"
+    }
+}
+
 Describe "write-checksums.ps1" {
     It "Writes one LF-terminated checksum line per file without a BOM" {
         $dir = Join-Path $TestDrive "sums"

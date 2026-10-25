@@ -121,7 +121,7 @@ if ($sha1Index -ge 0 -and $sha1Index + 1 -lt $signArguments.Count) {
     $thumbprint = $signArguments[$sha1Index + 1].ToUpperInvariant()
 }
 
-$assetDir = (Resolve-Path -LiteralPath $Path).Path
+$assetDir = (Resolve-Path -LiteralPath $Path).ProviderPath
 $zips = @(Get-ChildItem -LiteralPath $assetDir -Filter "mole-*-x64.zip" -File)
 if ($zips.Count -ne 1) {
     throw "Expected exactly one mole-<version>-x64.zip in $assetDir, found $($zips.Count)"
