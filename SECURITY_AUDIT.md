@@ -1,7 +1,33 @@
 # Mole Windows CLI Security Review
 
-Reviewed on 2026-10-13 against `88cf57e8` on the `windows` branch. This describes the open-source Windows CLI, not the paid Windows app. It follows the macOS CLI audit's structure while documenting Windows-specific controls and limitations. It is a maintainer review, not an independent security certification.
+The 2026-10-26 review starts from `8bff8583` on the `windows` branch and covers the complete Mole CLI (Windows). Mole for Windows and Mole Mac are outside its scope. This is a maintainer review, not an independent security certification. The earlier complete review used `88cf57e8` on 2026-10-13; its dated follow-ups remain below.
 
+## Review Scope and Evidence
+
+| Surface | Boundary under review | Regression evidence |
+| --- | --- | --- |
+| Core file operations and protection | Literal/canonical paths, whitelist, junctions, identities, callbacks, descendants and recycle outcomes | `tests/Core.Tests.ps1`, `tests/CleanupBoundary.Tests.ps1`, `tests/Protection.Tests.ps1`, `tests/Recycle.Tests.ps1` |
+| Automatic cleanup and owner commands | Disposable content, complete process/lock evidence, report age, protected stores and preview parity | `tests/AppCacheSafety.Tests.ps1`, `tests/CleanupTargets.Tests.ps1`, `tests/Clean.Tests.ps1`, `tests/DryRun.Tests.ps1` |
+| Uninstall | Registration identity, current Store metadata, shared content, bounded vendor waiting and final leftover ownership | `tests/Uninstall.Tests.ps1`, `tests/UninstallWait.Tests.ps1` |
+| Purge and optimize | Project/Git ownership, final checks, disk/power readiness, native command results and dry-run | `tests/PurgeBoundary.Tests.ps1`, `tests/Optimize.Tests.ps1`, `tests/DryRunEnvironment.Tests.ps1` |
+| Analyze | Asynchronous selection, protected descendants, path identity and native shell recycling | `cmd/analyze/*_test.go` |
+| Status and history | Partial/unknown measurements, credential-safe rendering, stored records and output encoding | `cmd/status/*_test.go`, `tests/History.Tests.ps1` |
+| Router, launchers, install, update and remove | Argument/exit-status handling, owned installation files, native-tool freshness, provenance and channel notices | `tests/Router.Tests.ps1`, `tests/Install.Tests.ps1`, `tests/InstallLifecycle.Tests.ps1`, `tests/UpdateNotice.Tests.ps1`, `cmd/mo/*_test.go` |
+| Tests, workflows and guidance | Nonempty passing test results, enforced/advisory gates, signed inventory and current safety claims | `tests/TestRunner.Tests.ps1`, `tests/Release.Tests.ps1`, `.github/workflows/`, `AGENTS.md` |
+
+The matrix identifies scope; the executed checks are recorded in Verification Evidence. This source review fixes the confirmed batch-file replacement gap in `34f646c2`. Package signatures, real UAC/vendor-uninstaller behavior and physical-machine acceptance remain separate evidence.
+
+### Changes Since the Previous Complete Review
+
+The source adds several safety boundaries beyond the `88cf57e8` review:
+
+- `d4eaffc4` preserves Poetry virtualenvs and Service Worker CacheStorage while adding exact application disk-cache leaves with process/lock, identity and exclusion checks. `b54d26ec` adds complete report-tree age checks and preserves Adobe Team Projects state. Regression coverage is in `tests/AppCacheSafety.Tests.ps1` and `tests/CleanupTargets.Tests.ps1`.
+- `c1ee99eb` retains game-library and emulator content in registered install folders. `87f26494` keeps registered identity separate from cleanup eligibility and rechecks current Store package identity and protected metadata before removal. `tests/Uninstall.Tests.ps1` covers shared-content, ordinary-install and single-game cases.
+- `ebc7e23a` still checks target-volume health when physical-disk inventory fails. `792e08dd` and `c0945edc` require complete battery evidence and avoid inferring Healthy from unknown capacity. Disk and power refusal cases live in `tests/Optimize.Tests.ps1`; native battery tests live in `cmd/status/`.
+
+These changes reduce specific data-loss and misleading-result risks. The [development record](docs/development-record.md) retains their original failing regressions, native runs and release receipts. Those historical results do not replace this review's final verification or remove the race, vendor-process and filesystem limitations below.
+
+### Earlier Bounded Follow-ups
 
 Bounded follow-up on 2026-10-14: `0b78b46b` adds unreadable-whitelist retention and preserves Spotify stores; `3a7f8b7b` narrows the Proton Pass command exception. The affected claims below are updated. This is not a new full security audit; regression and delivery evidence is in the development record.
 
@@ -59,7 +85,16 @@ Owner-cache preview records the resolved root without treating the whole store a
 
 ## Verification Evidence
 
-At the reviewed source revision, [Check](https://github.com/tw93/Mole/actions/runs/38382721940) and [Validation](https://github.com/tw93/Mole/actions/runs/38382721936) completed successfully. Validation includes PowerShell 5.1 and 7, Go tests, native builds and protected-path checks. Earlier local evidence, fixture red runs and exact batch scope are in the [development record](docs/development-record.md).
+The 2026-10-26 repair is `34f646c2`, based on `8bff8583`. `Remove-SafeItems` now rechecks its original path snapshot after the final owner callback, before both dry-run accounting and file removal. The single-item and directory helpers already performed the equivalent check. Three old-source cases failed for replaced files in real/preview mode and a parent changed to a junction; the unchanged-file positive control passed. This is a medium-severity local data-loss boundary, not a demonstrated privilege escalation.
+
+- Windows 11 ARM64 VM, Windows PowerShell 5.1.26100.9711 and PowerShell 7.6.7, Pester 6.2.0: `scripts/test.ps1 -NoGo` passed 681 tests on each engine, zero failed, skipped, inconclusive or not-run, exit 0.
+- Both engines parsed all 58 PowerShell source files. All three ARM64 Go test binaries passed natively; macOS-hosted `go test ./...`, Windows ARM64 vet and x64/ARM64 production cross-builds passed.
+- The native Go runner initially used the SYSTEM default temporary directory, which correctly triggered protected-system-root refusals. Setting its process-local `SystemTemp` to the owned fixture directory corrected the harness; no production guard was weakened.
+- Exact-revision CI is tracked under [the repair commit checks](https://github.com/tw93/Mole/commit/34f646c2/checks). Local results do not establish package delivery. The latest published runtime remains V1.39.0-windows; no release was made in this review.
+
+Cross-CLI review checked busy-input gating, protected descendants, Jupyter targets and owner-cache physical exclusions. Windows already has busy gating and bounded protected-descendant review, has no Jupyter runtime producer, and retains its existing owner-root requery/identity policy. No platform-specific macOS paths were copied. The current vendor-wait and Adobe synchronization rows now agree with the existing V1.39.0-windows receipt; release metadata and tag ancestry were rechecked, without repeating artifact-download acceptance.
+
+Historical evidence at `88cf57e8`: [Check](https://github.com/tw93/Mole/actions/runs/38382721940) and [Validation](https://github.com/tw93/Mole/actions/runs/38382721936) completed successfully. Validation included PowerShell 5.1 and 7, Go tests, native builds and protected-path checks. Later local evidence, fixture red runs and exact batch scope are in the [development record](docs/development-record.md). These runs do not establish current-HEAD validation.
 
 The checks have specific limits:
 

@@ -2,6 +2,14 @@
 
 This is the handoff record for the `windows` branch of `tw93/Mole`, not the paid Windows app or the macOS CLI. Read [AGENTS.md](../AGENTS.md) for current policy and [development pitfalls](development-pitfalls.md) for reusable lessons. Git history retains individual edits; this file records completed batches and their delivery boundaries. Recheck live state before resuming work.
 
+## 2026-10-26: Whole CLI safety review
+
+Frozen source `8bff8583`, repair `34f646c2`. The whole CLI review and remaining trust/race boundaries are recorded in [SECURITY_AUDIT.md](../SECURITY_AUDIT.md). Batch file removal now checks the original file/ancestor identity again after the final owner callback; replaced targets remain in place and contribute no dry-run count. The single-item and directory paths already had this boundary. No command, flag or setting was added.
+
+Old-source native Pester results were 39 passed and 3 failed, with the ordinary-file positive control passing. Final Windows PowerShell 5.1.26100.9711 and PowerShell 7.6.7 runs with Pester 6.2.0 each passed 681 tests with no failures or skips. Both engines parsed all 58 PowerShell files. All three Windows ARM64 Go test packages passed natively, macOS Go tests passed, and Windows x64/ARM64 builds plus ARM64 vet passed. The Go harness needed an owned process-local `SystemTemp` under the SYSTEM account; initial protected-root refusals were fixture setup, not a reason to weaken production policy.
+
+The review uses disposable fixtures, with no real vendor uninstall, UAC flow, signed package or release acceptance. The source fix is not in V1.39.0-windows. The existing vendor-wait and Adobe SYNC rows were corrected against that release's dated receipt, live release metadata and source ancestry, without claiming a new artifact check. GitHub checks remain tied to the exact repair commit and final branch head.
+
 ## 2026-10-25: V1.39.0-windows release preparation
 
 Candidate `b04cb5acfb04337c49c89b51912b81fedcda8890` sets both version sources to 1.39.0. Check and [Validation](https://github.com/tw93/Mole/actions/runs/40184116641) passed at that exact commit, including PowerShell 5.1, PowerShell 7, security and build jobs. The incremental GUI comparison found no additional production fix missing from the CLI. Private catalogs, GUI elevation and visualization, persistent monitoring and third-party application updates remain intentional differences; Mole self-update retains its existing scope.
