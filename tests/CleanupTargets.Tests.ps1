@@ -4,6 +4,7 @@ BeforeAll {
     . "$root\lib\clean\user.ps1"
     . "$root\lib\clean\caches.ps1"
     . "$root\lib\clean\system.ps1"
+    function Clear-Prefetch {}
     $script:SavedAppData = $env:APPDATA
     $script:SavedLocalAppData = $env:LOCALAPPDATA
     $env:APPDATA = Join-Path $TestDrive 'Roaming'
@@ -61,6 +62,7 @@ Describe 'Conservative cleanup targets' {
     It 'Keeps Explorer thumbnails and icons during ordinary user cleanup' {
         Invoke-UserCleanup
         Should -Invoke Clear-UserTempFiles -Times 1 -Exactly
+        Should -Invoke Clear-Prefetch -Times 0 -Exactly
         Should -Invoke Remove-SafeItems -Times 0 -Exactly
         Should -Invoke Remove-SafeItem -Times 0 -Exactly
     }

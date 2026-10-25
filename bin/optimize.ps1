@@ -141,6 +141,23 @@ function Test-SystemDriveOptimizable {
     return ($null -ne $volume)
 }
 
+function Test-MoleDiskPowerReady {
+    # Use the same CIM provider already used for system health. A complete empty
+    # Win32_Battery result identifies a desktop; unknown is never AC evidence.
+    try {
+        $batteries = @(Get-CimInstance -ClassName Win32_Battery -OperationTimeoutSec 3 -ErrorAction Stop)
+        if ($batteries.Count -eq 0) { return $true }
+        $power = @(Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus -OperationTimeoutSec 3 -ErrorAction Stop |
+            Where-Object { $_.Active -eq $true })
+        if ($power.Count -lt $batteries.Count) { return $false }
+        foreach ($sample in $power) {
+            if ($sample.PowerOnline -ne $true -or $sample.Discharging -ne $false) { return $false }
+        }
+        return $true
+    }
+    catch { return $false }
+}
+
 function Optimize-DiskDrive {
     <#
     .SYNOPSIS
@@ -154,6 +171,11 @@ function Optimize-DiskDrive {
 
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
+        return
+    }
+
+    if (-not (Test-MoleDiskPowerReady)) {
+        Write-Host "  $esc[90mDisk optimization skipped: external power could not be confirmed$esc[0m"
         return
     }
 
@@ -297,19 +319,10 @@ function Get-StartupPrograms {
         $startupCount += $startupFiles.Count
     }
 
-    if ($startupCount -gt 10) {
-        Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m $startupCount startup programs (high)"
-        Write-Host "  $esc[90mConsider disabling unnecessary startup items in Task Manager$esc[0m"
-        $script:IssuesFound++
-    }
-    elseif ($startupCount -gt 5) {
-        Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m $startupCount startup programs (moderate)"
-        $script:IssuesFound++
-    }
-    else {
-        $noun = if ($startupCount -eq 1) { 'program' } else { 'programs' }
-        Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m $startupCount startup $noun"
-    }
+    # Registered entries may be disabled in StartupApproved. Count them without
+    # inferring a health issue or recommending changes from quantity alone.
+    $noun = if ($startupCount -eq 1) { 'program' } else { 'programs' }
+    Write-Host "  $esc[90m$startupCount startup $noun$esc[0m"
 }
 
 function Test-SystemFiles {
@@ -458,8 +471,16 @@ function Test-DiskHealth {
 
     try {
         Start-Spinner "Checking disk health..."
-        try { $disks = Get-PhysicalDisk -ErrorAction Stop } finally { Stop-Spinner }
-
+        try { $disks = @(Get-PhysicalDisk -ErrorAction Stop) } finally { Stop-Spinner }
+        # If Windows cannot map the written volume, retain the conservative
+        # all-disks verdict. A known unrelated disk must not block this drive.
+        $targetDisks = @()
+        try {
+            $targetDisks = @(Get-Partition -DriveLetter (Get-SystemDriveLetter) -ErrorAction Stop |
+                Get-Disk -ErrorAction Stop)
+        }
+        catch { $targetDisks = @() }
+        $targetProblem = $false
         foreach ($disk in $disks) {
             $status = $disk.HealthStatus
             $name = $disk.FriendlyName
@@ -472,15 +493,23 @@ function Test-DiskHealth {
                 Write-Host "  $esc[90mDisk may have issues, consider backing up data$esc[0m"
                 $script:IssuesFound++
             }
-            else {
+            elseif ($status -eq "Unhealthy") {
                 Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m $name - $status"
                 Write-Host "  $esc[31mDisk has critical issues, back up data immediately!$esc[0m"
                 $script:IssuesFound++
             }
+            else { Write-Host "  $esc[90m$name - health unknown$esc[0m" }
         }
+        $healthTargets = $disks
+        if ($targetDisks.Count -gt 0) { $healthTargets = $targetDisks }
+        foreach ($target in $healthTargets) {
+            if ($target.HealthStatus -in @('Warning', 'Unhealthy')) { $targetProblem = $true }
+        }
+        return (-not $targetProblem)
     }
     catch {
         Write-Host "  $esc[90mCould not check disk health$esc[0m"
+        return $true
     }
 }
 
@@ -603,14 +632,17 @@ function Main {
     try { $health = Get-SystemHealth } finally { Stop-Spinner }
     Show-SystemHealth -Health $health
 
+    # Read health before the write-heavy operation, including in preview mode.
+    $diskAllowsOptimization = Test-DiskHealth
+    if ($diskAllowsOptimization) { Optimize-DiskDrive }
+    else { Write-Host "  Disk optimization skipped: the target disk reports a problem" }
+
     # Run optimizations
-    Optimize-DiskDrive
     Clear-DnsCache
     Optimize-Network
 
     # Run health checks
     Get-StartupPrograms
-    Test-DiskHealth
     Test-WindowsUpdate
     Test-SystemImage
 

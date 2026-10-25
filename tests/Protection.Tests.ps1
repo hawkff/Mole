@@ -140,6 +140,7 @@ Describe "Clean leaves user data alone" {
             New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
             Set-Content -Path $Path -Value ("x" * 2048)
             (Get-Item -LiteralPath $Path).LastWriteTime = $old
+            (Get-Item -LiteralPath $Path).CreationTime = $old
         }
 
         $dropbox = Join-Path $root "Dropbox"

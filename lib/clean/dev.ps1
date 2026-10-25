@@ -589,9 +589,8 @@ function Clear-EditorCaches {
     }
     
     # Sublime Text cache
-    $sublimeCachePath = "$env:APPDATA\Sublime Text\Cache"
-    if (Test-Path $sublimeCachePath) {
-        Clear-DirectoryContents -Path $sublimeCachePath -Description "Sublime Text cache"
+    foreach ($sublimeCachePath in @("$env:LOCALAPPDATA\Sublime Text\Cache", "$env:APPDATA\Sublime Text\Cache")) {
+        Clear-MoleAppCache -Path $sublimeCachePath -Description "Sublime Text cache" -Processes @('sublime_text', 'plugin_host')
     }
     
     # Atom cache (legacy)

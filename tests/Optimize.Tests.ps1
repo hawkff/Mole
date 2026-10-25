@@ -27,6 +27,8 @@ BeforeAll {
     # Windows PowerShell 5.1; plain functions shadow them so they can be.
     function script:Get-PhysicalDisk { }
     function script:Get-Volume { param($DriveLetter) }
+    function script:Get-Partition { param($DriveLetter) }
+    function script:Get-Disk { }
     function script:Optimize-Volume { param($DriveLetter) }
     function script:Clear-DnsClientCache { }
     function script:Repair-WindowsImage { param([switch]$Online, [switch]$CheckHealth, [switch]$RestoreHealth) }
@@ -62,11 +64,14 @@ Describe "mo optimize steps" {
         Mock Test-IsAdmin { $true }
         Mock Clear-Host { }
         Mock Read-Host { "n" }
+        Mock Get-CimInstance { @() }
         Mock Get-SystemHealth { @{ MemoryUsedGB = 1; MemoryTotalGB = 2; DiskUsedGB = 1; DiskTotalGB = 2; UptimeDays = 1 } }
         Mock Get-StartupPrograms { }
         Mock Test-WindowsUpdate { }
         Mock Get-PhysicalDisk { [pscustomobject]@{ FriendlyName = "Test SSD"; HealthStatus = "Healthy" } }
         Mock Get-Volume { [pscustomobject]@{ DriveLetter = "C" } }
+        Mock Get-Partition { [pscustomobject]@{ DiskNumber = 0 } }
+        Mock Get-Disk { [pscustomobject]@{ HealthStatus = "Healthy" } }
         Mock Optimize-Volume { }
         Mock Clear-DnsClientCache { }
         Mock Repair-WindowsImage { [pscustomobject]@{ ImageHealthState = "Healthy" } }
@@ -84,6 +89,57 @@ Describe "mo optimize steps" {
     AfterEach {
         $env:LOCALAPPDATA = $script:SavedLocalAppData
         $env:ProgramData = $script:SavedProgramData
+    }
+
+    It 'Keeps disk optimization off battery and unknown power: <State>' -TestCases @(
+        @{State='battery'}, @{State='unknown'}, @{State='partial'}
+    ) {
+        param($State)
+        $DryRun = $false; $ShowHelp = $false; $DebugMode = $false
+        Mock Get-CimInstance { [pscustomobject]@{DeviceID='pack'} } -ParameterFilter { $ClassName -eq 'Win32_Battery' }
+        if ($State -eq 'battery') {
+            Mock Get-CimInstance { [pscustomobject]@{Active=$true;PowerOnline=$false;Discharging=$true} } -ParameterFilter { $ClassName -eq 'BatteryStatus' }
+        }
+        elseif ($State -eq 'unknown') {
+            Mock Get-CimInstance { throw 'power source unreadable' } -ParameterFilter { $ClassName -eq 'BatteryStatus' }
+        }
+        Main 6>$null
+        Should -Invoke Optimize-Volume -Times 0 -Exactly
+    }
+
+    It 'Allows a laptop only with complete online non-discharging power evidence' {
+        $DryRun = $false; $ShowHelp = $false; $DebugMode = $false
+        Mock Get-CimInstance { [pscustomobject]@{DeviceID='pack'} } -ParameterFilter { $ClassName -eq 'Win32_Battery' }
+        Mock Get-CimInstance { [pscustomobject]@{Active=$true;PowerOnline=$true;Discharging=$false} } -ParameterFilter { $ClassName -eq 'BatteryStatus' }
+        Main 6>$null
+        Should -Invoke Optimize-Volume -Times 1 -Exactly
+    }
+
+    It 'Checks target disk health before optimization and keeps a failing target untouched' {
+        $DryRun = $false; $ShowHelp = $false; $DebugMode = $false
+        Mock Get-PhysicalDisk { [pscustomobject]@{ DeviceId=0; FriendlyName='System SSD'; HealthStatus='Warning' } }
+        Mock Get-Disk { [pscustomobject]@{ HealthStatus='Warning' } }
+        Main 6>$null
+        Should -Invoke Optimize-Volume -Times 0 -Exactly
+        Should -Invoke Get-PhysicalDisk -Times 1 -Exactly
+    }
+
+    It 'An unrelated unhealthy disk does not block the healthy system disk' {
+        $DryRun = $false; $ShowHelp = $false; $DebugMode = $false
+        Mock Get-PhysicalDisk { @(
+            [pscustomobject]@{ DeviceId=0; FriendlyName='System SSD'; HealthStatus='Healthy' },
+            [pscustomobject]@{ DeviceId=1; FriendlyName='External'; HealthStatus='Unhealthy' }
+        ) }
+        Main 6>$null
+        Should -Invoke Optimize-Volume -Times 1 -Exactly
+    }
+
+    It 'Unknown disk health does not invent a critical failure' {
+        Mock Get-PhysicalDisk { [pscustomobject]@{ DeviceId=0; FriendlyName='RAID'; HealthStatus='Unknown' } }
+        $output = Test-DiskHealth 6>&1 | Out-String
+        $output | Should -Match 'health unknown'
+        $output | Should -Not -Match 'critical|back up'
+        $script:IssuesFound | Should -Be 0
     }
 
     It "Never resets Winsock or rebuilds search, icon, font or Store caches when elevated" {
@@ -149,6 +205,22 @@ Describe "mo optimize steps" {
         foreach ($name in @("Repair-FontCache", "Repair-IconCache", "Repair-SearchIndex", "Repair-StoreCache")) {
             $script:OptimizeFunctionNames | Should -Not -Contain $name
         }
+    }
+}
+
+Describe 'Startup registration counts are not failures' {
+    It 'Does not infer a problem from <Count> registrations' -TestCases @(@{Count=6},@{Count=11}) {
+        param($Count)
+        $script:IssuesFound = 0
+        $script:StartupFixture = [pscustomobject]@{}
+        foreach ($index in 1..$Count) { $script:StartupFixture | Add-Member -NotePropertyName "app$index" -NotePropertyValue 'app.exe' }
+        Mock Test-Path { $false }
+        Mock Test-Path { $true } -ParameterFilter { $Path -eq 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
+        Mock Get-ItemProperty { $script:StartupFixture }
+        $output = Get-StartupPrograms 6>&1 | Out-String
+        $output | Should -Match "$Count startup programs"
+        $output | Should -Not -Match 'high|moderate|Consider disabling'
+        $script:IssuesFound | Should -Be 0
     }
 }
 

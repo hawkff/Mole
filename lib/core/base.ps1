@@ -234,6 +234,7 @@ $script:CleanProtectedPathSegments = @(
     "Local Extension Settings"
     "Sync Data"
     "Service Worker\CacheStorage"
+    "Adobe\Common\Team Projects Cache"
     "pypoetry\Cache\virtualenvs"
     "User\History"
     ".claude\projects"

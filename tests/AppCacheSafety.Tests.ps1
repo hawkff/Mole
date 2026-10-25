@@ -3,6 +3,8 @@ BeforeAll {
     $repo = Split-Path -Parent $PSScriptRoot
     . "$repo\lib\clean\caches.ps1"
     . "$repo\lib\clean\dev.ps1"
+    . "$repo\lib\clean\user.ps1"
+    . "$repo\lib\clean\apps.ps1"
     $script:SavedCacheEnvironment = @{}
     foreach ($name in @('USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'MO_NO_OPLOG')) {
         $script:SavedCacheEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
@@ -40,6 +42,94 @@ Describe 'Application cache boundaries' {
         Mock Invoke-MoleOwnerCacheCleanup {}
         Mock Start-Section {}
         Mock Stop-Section {}
+    }
+
+    It 'Keeps recent error reports and dumps in preview and real cleanup' {
+        $old = New-CacheFile "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive\old\Report.wer"
+        $recent = New-CacheFile "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive\recent\Report.wer"
+        $oldDump = New-CacheFile "$env:LOCALAPPDATA\CrashDumps\old.dmp"
+        $recentDump = New-CacheFile "$env:LOCALAPPDATA\CrashDumps\recent.dmp"
+        foreach ($path in @($old, (Split-Path $old), $oldDump)) {
+            (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-10)
+            (Get-Item -LiteralPath $path).CreationTime = (Get-Date).AddDays(-10)
+        }
+        Set-DryRunMode -Enabled $true
+        Clear-ErrorReports -DaysOld 7
+        Test-Path -LiteralPath $old | Should -BeTrue
+        $preview = Get-Content -LiteralPath $script:ExportListFile -Raw
+        $preview | Should -Match 'old'
+        $preview | Should -Not -Match 'recent'
+        Set-DryRunMode -Enabled $false
+        Clear-ErrorReports -DaysOld 7
+        Test-Path -LiteralPath $old | Should -BeFalse
+        Test-Path -LiteralPath $oldDump | Should -BeFalse
+        Test-Path -LiteralPath $recent | Should -BeTrue
+        Test-Path -LiteralPath $recentDump | Should -BeTrue
+    }
+
+    It 'Keeps an old report directory with a recently written attachment' {
+        $report = New-CacheFile "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportQueue\old\Report.wer"
+        $fresh = New-CacheFile "$(Split-Path $report)\attachment.dmp"
+        foreach ($path in @($report, (Split-Path $report))) {
+            (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-10)
+            (Get-Item -LiteralPath $path).CreationTime = (Get-Date).AddDays(-10)
+        }
+        Clear-ErrorReports
+        Test-Path -LiteralPath $report | Should -BeTrue
+        Test-Path -LiteralPath $fresh | Should -BeTrue
+    }
+
+    It 'Keeps a report that receives an attachment after sizing' {
+        $report = New-CacheFile "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive\old\Report.wer"
+        foreach ($path in @($report, (Split-Path $report))) {
+            (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-10)
+            (Get-Item -LiteralPath $path).CreationTime = (Get-Date).AddDays(-10)
+        }
+        $script:ReportAttachment = "$(Split-Path $report)\new.dmp"
+        Mock Get-ValidatedTreeSize {
+            [IO.File]::WriteAllText($script:ReportAttachment, 'new diagnostic')
+            return 10
+        }
+        Clear-ErrorReports
+        Test-Path -LiteralPath $report | Should -BeTrue
+        Test-Path -LiteralPath $script:ReportAttachment | Should -BeTrue
+        (Get-CleanupStats).FilesCleaned | Should -Be 0
+    }
+
+    It 'Cleans Sublime Local and existing Roaming caches only while the owner is idle' {
+        $local = New-CacheFile "$env:LOCALAPPDATA\Sublime Text\Cache\entry"
+        $roaming = New-CacheFile "$env:APPDATA\Sublime Text\Cache\entry"
+        $settings = New-CacheFile "$env:APPDATA\Sublime Text\Packages\User\settings"
+        Mock Get-Process { [pscustomobject]@{ProcessName='sublime_text'} }
+        Clear-EditorCaches
+        Test-Path -LiteralPath $local | Should -BeTrue
+        Test-Path -LiteralPath $roaming | Should -BeTrue
+        Mock Get-Process { @() }
+        Clear-EditorCaches
+        Test-Path -LiteralPath $local | Should -BeFalse
+        Test-Path -LiteralPath $roaming | Should -BeFalse
+        Test-Path -LiteralPath $settings | Should -BeTrue
+    }
+
+    It 'Keeps Adobe Team Projects state beside rebuildable media caches' {
+        $state = New-CacheFile "$env:APPDATA\Adobe\Common\Team Projects Cache\project.db"
+        $media = New-CacheFile "$env:APPDATA\Adobe\Common\Media Cache Files\clip.cache"
+        Set-DryRunMode -Enabled $true
+        Clear-AdobeData
+        Get-Content -LiteralPath $script:ExportListFile -Raw | Should -Not -Match 'Team Projects Cache'
+        Set-DryRunMode -Enabled $false
+        Clear-AdobeData
+        Test-Path -LiteralPath $state | Should -BeTrue
+        Test-Path -LiteralPath $media | Should -BeFalse
+    }
+
+    It 'Protects Team Projects state at the shared clean sink including parent sweeps' {
+        $state = New-CacheFile "$env:APPDATA\Adobe\Common\Team Projects Cache\project.db"
+        $neighbor = New-CacheFile "$env:APPDATA\Adobe\Common\Team Projects Cache Backup\entry"
+        Remove-SafeItem -Path "$env:APPDATA\Adobe\Common" -Recurse | Should -BeFalse
+        Remove-SafeItem -Path $state | Should -BeFalse
+        Test-Path -LiteralPath $state | Should -BeTrue
+        Remove-SafeItem -Path $neighbor | Should -BeTrue
     }
 
     It 'Keeps Poetry virtualenvs while cleaning its two disposable children' {

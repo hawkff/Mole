@@ -255,7 +255,6 @@ function Clear-AdobeData {
     $adobeCachePaths = @(
         "$env:APPDATA\Adobe\Common\Media Cache Files"
         "$env:APPDATA\Adobe\Common\Peak Files"
-        "$env:APPDATA\Adobe\Common\Team Projects Cache"
         "$env:LOCALAPPDATA\Adobe\*\Cache"
         "$env:LOCALAPPDATA\Adobe\*\CameraRaw\Cache"
         "$env:LOCALAPPDATA\Temp\Adobe"

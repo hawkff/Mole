@@ -121,64 +121,63 @@ function Clear-RecycleBin {
 # Windows Error Reports Cleanup
 # ============================================================================
 
-function Clear-ErrorReports {
-    <#
-    .SYNOPSIS
-        Clean Windows Error Reporting files
-    #>
-    param([int]$DaysOld = 7)
-    
-    # One WER root, listed one level deep: a recursive listing counted every
-    # report folder and the files inside it again. CrashDumps is handled with
-    # the memory dumps below, so it is not listed here as well.
-    $werPaths = @(
-        "$env:LOCALAPPDATA\Microsoft\Windows\WER"
-    )
-    
-    foreach ($path in $werPaths) {
-        if (Test-Path $path) {
-            $items = Get-ChildItem -Path $path -Force -ErrorAction SilentlyContinue
-            if ($items) {
-                $paths = $items | ForEach-Object { $_.FullName }
-                Remove-SafeItems -Paths $paths -Description "Error reports"
+# A report is retained as a whole when any descendant is recent or unreadable.
+# The same bounded check runs after sizing and at the removal boundary.
+function Test-MoleOldErrorReport {
+    param([string]$Path, [datetime]$Cutoff)
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($Path)
+    $seen = 0
+    try {
+        while ($pending.Count -gt 0) {
+            if (++$seen -gt 4096 -or $timer.Elapsed.TotalSeconds -gt 2) { return $false }
+            $item = Get-Item -LiteralPath $pending.Pop() -Force -ErrorAction Stop
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                $item.LastWriteTime -ge $Cutoff -or $item.CreationTime -ge $Cutoff) { return $false }
+            if ($item.PSIsContainer) {
+                foreach ($child in [IO.Directory]::EnumerateFileSystemEntries($item.FullName)) {
+                    if ($pending.Count + $seen -ge 4096 -or $timer.Elapsed.TotalSeconds -gt 2) { return $false }
+                    $pending.Push($child)
+                }
             }
         }
+        return $true
     }
-    
-    # Memory dumps
-    $dumpPaths = @(
-        "$env:LOCALAPPDATA\CrashDumps"
-    )
-    
-    foreach ($path in $dumpPaths) {
-        $dumps = Get-ChildItem -Path $path -Filter "*.dmp" -ErrorAction SilentlyContinue
-        if ($dumps) {
-            $paths = $dumps | ForEach-Object { $_.FullName }
-            Remove-SafeItems -Paths $paths -Description "Memory dumps"
-        }
-    }
+    catch { return $false }
 }
 
-# ============================================================================
-# Windows Prefetch Cleanup (requires admin)
-# ============================================================================
-
-function Clear-Prefetch {
-    <#
-    .SYNOPSIS
-        Clean Windows Prefetch files (requires admin)
-    #>
-    param([int]$DaysOld = 14)
-    
-    if (-not (Test-IsAdmin)) {
-        Write-Debug "Skipping Prefetch cleanup - requires admin"
-        return
-    }
-    
-    $prefetchPath = "$env:WINDIR\Prefetch"
-    
-    if (Test-Path $prefetchPath) {
-        Remove-OldFiles -Path $prefetchPath -DaysOld $DaysOld -Description "Prefetch files"
+function Clear-ErrorReports {
+    param([int]$DaysOld = 7)
+    $cutoff = (Get-Date).AddDays(-$DaysOld)
+    # Keep the WER collection roots; each report has its own age and guard.
+    foreach ($root in @(
+        "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportArchive",
+        "$env:LOCALAPPDATA\Microsoft\Windows\WER\ReportQueue",
+        "$env:LOCALAPPDATA\CrashDumps"
+    )) {
+        $snapshot = Get-MolePathSnapshot -Path $root
+        if (-not $snapshot) { continue }
+        $reports = New-Object 'System.Collections.Generic.List[System.IO.FileSystemInfo]'
+        $scan = [Diagnostics.Stopwatch]::StartNew()
+        $complete = $true
+        try {
+            foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($root)) {
+                if ($reports.Count -ge 4096 -or $scan.Elapsed.TotalSeconds -gt 2) { $complete = $false; break }
+                $reports.Add((Get-Item -LiteralPath $entry -Force -ErrorAction Stop))
+            }
+        }
+        catch { $complete = $false }
+        if (-not $complete -or $scan.Elapsed.TotalSeconds -gt 2) { continue }
+        if (-not (Test-MolePathSnapshot $snapshot)) { continue }
+        foreach ($report in $reports) {
+            if ($root -eq "$env:LOCALAPPDATA\CrashDumps" -and
+                ($report.PSIsContainer -or $report.Extension -ine '.dmp')) { continue }
+            $reportPath = $report.FullName
+            if (-not (Test-MoleOldErrorReport -Path $reportPath -Cutoff $cutoff)) { continue }
+            $guard = { (Test-MolePathSnapshot $snapshot) -and (Test-MoleOldErrorReport -Path $reportPath -Cutoff $cutoff) }
+            Remove-SafeItems -Paths @($reportPath) -Description 'Error reports' -CanRemove $guard
+        }
     }
 }
 
@@ -237,7 +236,6 @@ function Invoke-UserCleanup {
     Clear-UserTempFiles -DaysOld $TempDaysOld
     Clear-ErrorReports -DaysOld 7
     Clear-UserLogs -DaysOld $LogDaysOld
-    Clear-Prefetch -DaysOld 14
     
     # Optional: Downloads cleanup
     if ($IncludeDownloads) {

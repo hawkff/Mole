@@ -334,9 +334,13 @@ Describe "Cleanup accounting" {
         Set-Content -Path (Join-Path $wer "Report.wer") -Value "report"
         Set-Content -Path (Join-Path $dumps "app.dmp") -Value "dump"
 
+        foreach ($path in @($wer, (Join-Path $wer "Report.wer"), (Join-Path $dumps "app.dmp"))) {
+            (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddDays(-10)
+            (Get-Item -LiteralPath $path).CreationTime = (Get-Date).AddDays(-10)
+        }
         Clear-ErrorReports
 
-        # One WER root entry (ReportArchive) plus one dump.
+        # One complete old report plus one dump.
         (Get-CleanupStats).FilesCleaned | Should -Be 2
     }
 

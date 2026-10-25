@@ -15,7 +15,7 @@ BeforeAll {
     function Clear-DnsCache {}
     function Optimize-Network {}
     function Get-StartupPrograms {}
-    function Test-DiskHealth {}
+    function Test-DiskHealth { $true }
     function Test-WindowsUpdate {}
     function Test-SystemImage {}
     function Test-IsAdmin { $false }
