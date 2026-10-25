@@ -48,6 +48,8 @@ Cross-compilation proves the Go source builds for Windows; it does not exercise 
 
 A passing CI run and pushed source do not establish delivery in signed packages. Keep source, native validation and release evidence separate in the development record, and verify the actual release channel before telling users an update contains a fix.
 
+For resolved filesystem roots passed to native executables or System.IO, use `Resolve-Path.ProviderPath`. Its `Path` property can carry a PowerShell provider prefix for UNC shares: PowerShell accepts that spelling, but signtool rejects the file and archive entry slicing uses the wrong root length. The two cases in `Release.Tests.ps1` execute the signing and archive root assignments with distinct provider and native paths; both failed before the fix and passed under PowerShell 5.1 and 7.
+
 ## Installer inventory and shared directories
 
 A documentation-only change can still change uninstall behavior: the October 13 development notes were initially missing from the install inventory, and both PowerShell CI jobs failed. Every shipped nested file belongs in `Get-MoleInstallNestedFiles`; its inventory test is a required check even for docs. A familiar directory name such as `bin` or `scripts` does not establish ownership of all its contents. Merge installation files and remove exact known files, preserving unknown entries and nonempty Git metadata. Test a shared directory, a pre-created empty directory and a linked ancestor independently.
