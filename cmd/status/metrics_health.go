@@ -191,13 +191,16 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 }
 
 // batteryHealthLabel returns a human-readable health label and severity based on cycle count and capacity.
-// Severity is "ok", "warn", or "danger".
+// Severity is "ok", "warn", "danger", or "unknown" (no label).
 func batteryHealthLabel(cycles int, capacity int) (string, string) {
 	if cycles > batteryCycleDanger || (capacity > 0 && capacity < batteryCapDanger) {
 		return "Service Soon", "danger"
 	}
 	if cycles > batteryCycleWarn || (capacity > 0 && capacity < batteryCapWarn) {
 		return "Fair", "warn"
+	}
+	if capacity <= 0 {
+		return "", "unknown"
 	}
 	return "Healthy", "ok"
 }

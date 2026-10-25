@@ -304,6 +304,11 @@ func TestBatteryHealthUsesEveryPresentPack(t *testing.T) {
 			if err != nil || design != 0 || full != 0 || cycles != 230 {
 				t.Fatalf("independent cycles lost: %d/%d cycles=%d err=%v", full, design, cycles, err)
 			}
+			card := renderBatteryCard([]BatteryStatus{{Percent: 50, Capacity: batteryHealthPercent(design, full), CycleCount: cycles, Status: "Discharging"}}, true)
+			rendered := strings.Join(card.lines, "\n")
+			if strings.Contains(rendered, "Healthy") || !strings.Contains(rendered, "230 cycles") {
+				t.Fatalf("unknown aggregate capacity lost its meaning: %q", rendered)
+			}
 		}
 	}
 	if _, _, _, err := collectBatteryHealth([]string{"empty"}, read); err == nil {

@@ -192,7 +192,9 @@ func TestBatteryHealthLabel(t *testing.T) {
 		{"high cycles", 950, 85, "Service Soon", "danger"},
 		{"low capacity", 200, 55, "Service Soon", "danger"},
 		{"warn capacity", 200, 75, "Fair", "warn"},
-		{"zero values", 0, 0, "Healthy", "ok"},
+		{"zero values", 0, 0, "", "unknown"},
+		{"known cycles unknown capacity", 100, 0, "", "unknown"},
+		{"unknown capacity high cycles", 950, 0, "Service Soon", "danger"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

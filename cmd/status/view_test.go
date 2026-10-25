@@ -1519,3 +1519,38 @@ func TestStatusFitsShortNarrowTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestBatteryCardUnknownCapacityPreservesCycles(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		capacity, cycles int
+		want             string
+	}{
+		{"capacity unavailable", 0, 100, "100 cycles"},
+		{"known healthy capacity", 98, 100, "Healthy"},
+		{"known worn capacity", 20, 50, "Service Soon"},
+		{"known cycle warning", 0, 950, "Service Soon"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			card := renderBatteryCard([]BatteryStatus{{Percent: 50, Capacity: tc.capacity, CycleCount: tc.cycles, Status: "Discharging"}}, true)
+			rendered := strings.Join(card.lines, "\n")
+			if !strings.Contains(rendered, tc.want) {
+				t.Fatalf("missing %q in %q", tc.want, rendered)
+			}
+			if tc.capacity == 0 && strings.Contains(rendered, "Healthy") {
+				t.Fatalf("unknown capacity rendered healthy: %q", rendered)
+			}
+			if strings.Contains(rendered, "·  ·") || strings.Contains(rendered, "· ·") {
+				t.Fatalf("empty health label left a separator: %q", rendered)
+			}
+		})
+	}
+}
+
+func TestBatteryCardUnknownCapacityKeepsSystemCondition(t *testing.T) {
+	card := renderBatteryCard([]BatteryStatus{{Percent: 50, CycleCount: 100, Health: "Service Recommended", Status: "Discharging"}}, true)
+	rendered := strings.Join(card.lines, "\n")
+	if !strings.Contains(rendered, "Service Recommended") || !strings.Contains(rendered, "100 cycles") || strings.Contains(rendered, "Healthy") {
+		t.Fatalf("independent system condition or cycles lost: %q", rendered)
+	}
+}
