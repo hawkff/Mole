@@ -727,6 +727,7 @@ function Remove-SafeItems {
         if (-not (Test-SafePath $path -WhitelistState $whitelistState) -or -not (Test-MolePathSnapshot $pathSnapshot)) { continue }
 
         if (-not (Test-MoleRemovalCondition $CanRemove)) { continue }
+        if (-not (Test-MolePathSnapshot $pathSnapshot)) { continue }
 
         if ($script:MoleDryRunMode) {
             $totalSize += $size

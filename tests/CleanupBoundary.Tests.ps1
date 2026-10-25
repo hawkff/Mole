@@ -72,6 +72,59 @@ Describe 'Cleanup physical boundaries' {
         Remove-SafeItem -Path $script:Cache -Recurse | Should -BeFalse
         Get-Content -LiteralPath (Join-Path $script:Cache 'same.txt') | Should -Be 'replacement'
     }
+    It 'Keeps a file replaced during its owner check in preview and removal' -TestCases @(
+        @{ Preview = $false }, @{ Preview = $true }
+    ) {
+        param($Preview)
+        $script:Candidate = Join-Path $script:Root 'cache.bin'
+        $script:Original = Join-Path $script:Root 'original.bin'
+        Set-Content -LiteralPath $script:Candidate -Value 'original'
+        Reset-CleanupStats
+        Set-DryRunMode -Enabled $Preview
+        $condition = {
+            Move-Item -LiteralPath $script:Candidate -Destination $script:Original
+            Set-Content -LiteralPath $script:Candidate -Value 'replacement'
+            return $true
+        }
+        Remove-SafeItems -Paths @($script:Candidate) -CanRemove $condition
+        Get-Content -LiteralPath $script:Candidate -ErrorAction Stop | Should -Be 'replacement'
+        Get-Content -LiteralPath $script:Original -ErrorAction Stop | Should -Be 'original'
+        (Get-CleanupStats).FilesCleaned | Should -Be 0
+    }
+    It 'Keeps a file when its parent becomes a junction during the owner check' {
+        $script:CacheParent = Join-Path $script:Root 'cache'
+        $script:RedirectedParent = Join-Path $script:Root 'user-data'
+        $script:OriginalParent = Join-Path $script:Root 'original-cache'
+        New-Item -ItemType Directory -Path $script:CacheParent, $script:RedirectedParent | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:CacheParent 'same.bin') -Value 'cache'
+        $sentinel = Join-Path $script:RedirectedParent 'same.bin'
+        Set-Content -LiteralPath $sentinel -Value 'user data'
+        Reset-CleanupStats
+        $condition = {
+            Move-Item -LiteralPath $script:CacheParent -Destination $script:OriginalParent
+            New-Item -ItemType Junction -Path $script:CacheParent -Target $script:RedirectedParent | Out-Null
+            return $true
+        }
+        try {
+            Remove-SafeItems -Paths @((Join-Path $script:CacheParent 'same.bin')) -CanRemove $condition
+            Get-Content -LiteralPath $sentinel -ErrorAction Stop | Should -Be 'user data'
+            Get-Content -LiteralPath (Join-Path $script:OriginalParent 'same.bin') -ErrorAction Stop | Should -Be 'cache'
+            (Get-CleanupStats).FilesCleaned | Should -Be 0
+        }
+        finally {
+            if (Test-IsReparsePoint -Path $script:CacheParent) {
+                [IO.Directory]::Delete($script:CacheParent, $false)
+            }
+        }
+    }
+    It 'Still removes an unchanged file after its owner check' {
+        $candidate = Join-Path $script:Root 'cache.bin'
+        Set-Content -LiteralPath $candidate -Value 'cache'
+        Reset-CleanupStats
+        Remove-SafeItems -Paths @($candidate) -CanRemove { return $true }
+        Test-Path -LiteralPath $candidate | Should -BeFalse
+        (Get-CleanupStats).FilesCleaned | Should -Be 1
+    }
     It 'Keeps a deletion target when an existing whitelist cannot be read' {
         $cache = Join-Path $script:Root 'retained.txt'
         Set-Content -LiteralPath $cache -Value 'keep'
