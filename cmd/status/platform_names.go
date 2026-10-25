@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -139,4 +140,46 @@ func batteryHealthPercent(design, full int) int {
 	}
 	pct := math.Round(float64(full) * 100 / float64(design))
 	return int(min(max(pct, 0), 100))
+}
+
+// Whole-machine charge and health must describe the same battery set. Unknown
+// devices invalidate health; a successfully probed empty bay does not. Cycles
+// show the oldest pack only when every count is known, never a sum.
+type batteryHealthSample struct {
+	present, relative    bool
+	design, full, cycles int
+}
+
+func collectBatteryHealth(paths []string, read func(string) (batteryHealthSample, error)) (design, full, cycles int, err error) {
+	present := false
+	cyclesKnown := true
+	capacityKnown := true
+	for _, path := range paths {
+		sample, readErr := read(path)
+		if readErr != nil {
+			return 0, 0, 0, readErr
+		}
+		if !sample.present {
+			continue
+		}
+		if sample.relative || sample.design <= 0 || sample.full <= 0 ||
+			sample.design == math.MaxUint32 || sample.full == math.MaxUint32 {
+			capacityKnown = false
+		}
+		present = true
+		design += sample.design
+		full += sample.full
+		cycles = max(cycles, sample.cycles)
+		cyclesKnown = cyclesKnown && sample.cycles > 0
+	}
+	if !present {
+		return 0, 0, 0, errors.New("no system battery")
+	}
+	if !capacityKnown {
+		design, full = 0, 0
+	}
+	if !cyclesKnown {
+		cycles = 0
+	}
+	return design, full, cycles, nil
 }

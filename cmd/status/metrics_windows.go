@@ -511,45 +511,68 @@ func readBatteryHealth() (design, full, cycles int, err error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	if len(paths) == 0 {
-		return 0, 0, 0, errors.New("no battery device")
-	}
-	path, err := windows.UTF16PtrFromString(paths[0])
+	return collectBatteryHealth(paths, readBatteryDeviceHealth)
+}
+
+func readBatteryDeviceHealth(device string) (batteryHealthSample, error) {
+	path, err := windows.UTF16PtrFromString(device)
 	if err != nil {
-		return 0, 0, 0, err
+		return batteryHealthSample{}, err
 	}
 	h, err := windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
-		return 0, 0, 0, err
+		return batteryHealthSample{}, err
 	}
 	defer windows.CloseHandle(h) //nolint:errcheck
 
-	var wait uint32
-	var tag uint32
-	var returned uint32
-	if err := windows.DeviceIoControl(h, ioctlBatteryQueryTag,
-		(*byte)(unsafe.Pointer(&wait)), uint32(unsafe.Sizeof(wait)),
-		(*byte)(unsafe.Pointer(&tag)), uint32(unsafe.Sizeof(tag)), &returned, nil); err != nil {
-		return 0, 0, 0, err
+	return queryBatteryDeviceHealth(
+		func(tag, returned *uint32) error {
+			var wait uint32
+			return windows.DeviceIoControl(h, ioctlBatteryQueryTag,
+				(*byte)(unsafe.Pointer(&wait)), uint32(unsafe.Sizeof(wait)),
+				(*byte)(unsafe.Pointer(tag)), uint32(unsafe.Sizeof(*tag)), returned, nil)
+		},
+		func(tag uint32, info *batteryInformation, returned *uint32) error {
+			query := batteryQueryInformation{BatteryTag: tag}
+			return windows.DeviceIoControl(h, ioctlBatteryQueryInformation,
+				(*byte)(unsafe.Pointer(&query)), uint32(unsafe.Sizeof(query)),
+				(*byte)(unsafe.Pointer(info)), uint32(unsafe.Sizeof(*info)), returned, nil)
+		},
+	)
+}
+
+func queryBatteryDeviceHealth(queryTag func(*uint32, *uint32) error, queryInfo func(uint32, *batteryInformation, *uint32) error) (batteryHealthSample, error) {
+	var tag, returned uint32
+	err := queryTag(&tag, &returned)
+	// Only QueryTag's documented no-battery result identifies an empty bay.
+	// A later FILE_NOT_FOUND can mean hot replacement, so it remains unknown.
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) && tag == 0 {
+		return batteryHealthSample{}, nil
 	}
-	if tag == 0 {
-		return 0, 0, 0, errors.New("no battery tag")
+	if err != nil {
+		return batteryHealthSample{}, err
+	}
+	if returned != uint32(unsafe.Sizeof(tag)) || tag == 0 {
+		return batteryHealthSample{}, errors.New("battery tag incomplete")
+	}
+	var info batteryInformation
+	returned = 0
+	if err := queryInfo(tag, &info, &returned); err != nil {
+		return batteryHealthSample{}, err
+	}
+	if returned != uint32(unsafe.Sizeof(info)) {
+		return batteryHealthSample{}, errors.New("battery information incomplete")
 	}
 
-	query := batteryQueryInformation{BatteryTag: tag}
-	var info batteryInformation
-	if err := windows.DeviceIoControl(h, ioctlBatteryQueryInformation,
-		(*byte)(unsafe.Pointer(&query)), uint32(unsafe.Sizeof(query)),
-		(*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &returned, nil); err != nil {
-		return 0, 0, 0, err
+	// A successfully queried peripheral battery is not a system power battery.
+	if info.Capabilities&0x80000000 == 0 {
+		return batteryHealthSample{}, nil
 	}
-	if info.Capabilities&batteryCapacityRelative != 0 {
-		// Relative capacities are not mWh, so design and full charge cannot be
-		// compared into a health percentage.
-		return 0, 0, int(info.CycleCount), nil
-	}
-	return int(info.DesignedCapacity), int(info.FullChargedCapacity), int(info.CycleCount), nil
+	return batteryHealthSample{
+		present: true, relative: info.Capabilities&batteryCapacityRelative != 0,
+		design: int(info.DesignedCapacity), full: int(info.FullChargedCapacity), cycles: int(info.CycleCount),
+	}, nil
 }
 
 // --- Hardware ---

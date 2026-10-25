@@ -644,6 +644,7 @@ function Get-MoleInstallNestedFiles {
         "cmd\analyze\windows_test.go"
         "cmd\mo\main.go"
         "cmd\mo\main_test.go"
+        "cmd\status\battery_windows_test.go"
         "cmd\status\collection.go"
         "cmd\status\diagnosis.go"
         "cmd\status\main.go"

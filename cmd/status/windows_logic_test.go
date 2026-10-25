@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -274,5 +275,46 @@ func TestFormatCPUCoresLine(t *testing.T) {
 	}
 	if got := formatCPUCoresLine(CPUStatus{}); got != "" {
 		t.Errorf("unknown counts should hide the line, got %q", got)
+	}
+}
+
+func TestBatteryHealthUsesEveryPresentPack(t *testing.T) {
+	samples := map[string]batteryHealthSample{
+		"empty":  {},
+		"first":  {present: true, design: 40000, full: 30000, cycles: 40},
+		"second": {present: true, design: 60000, full: 30000, cycles: 100},
+	}
+	read := func(path string) (batteryHealthSample, error) { return samples[path], nil }
+	design, full, cycles, err := collectBatteryHealth([]string{"empty", "first", "second"}, read)
+	if err != nil || design != 100000 || full != 60000 || cycles != 100 {
+		t.Fatalf("combined=%d/%d cycles=%d err=%v", full, design, cycles, err)
+	}
+	samples["second"] = batteryHealthSample{present: true, design: 60000, full: 30000}
+	design, full, cycles, err = collectBatteryHealth([]string{"first", "second"}, read)
+	if err != nil || design != 100000 || full != 60000 || cycles != 0 {
+		t.Fatal("unknown pack cycles reported as complete")
+	}
+	for _, bad := range []batteryHealthSample{
+		{present: true, relative: true, design: 100, full: 80, cycles: 230},
+		{present: true, design: 60000, cycles: 230},
+	} {
+		samples["second"] = bad
+		for _, paths := range [][]string{{"second"}, {"first", "second"}} {
+			design, full, cycles, err := collectBatteryHealth(paths, read)
+			if err != nil || design != 0 || full != 0 || cycles != 230 {
+				t.Fatalf("independent cycles lost: %d/%d cycles=%d err=%v", full, design, cycles, err)
+			}
+		}
+	}
+	if _, _, _, err := collectBatteryHealth([]string{"empty"}, read); err == nil {
+		t.Fatal("empty bay accepted")
+	}
+	if _, _, _, err := collectBatteryHealth([]string{"first", "unknown"}, func(path string) (batteryHealthSample, error) {
+		if path == "unknown" {
+			return batteryHealthSample{}, errors.New("unreadable")
+		}
+		return samples[path], nil
+	}); err == nil {
+		t.Fatal("unreadable pack accepted")
 	}
 }
