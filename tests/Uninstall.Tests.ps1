@@ -246,6 +246,59 @@ Describe "Install folder eligibility" {
     }
 }
 
+Describe 'Generic game content in install folders' {
+    It 'Keeps a content folder <Name> inside an otherwise ordinary install' -TestCases @(
+        @{Name='roms'}, @{Name='saves'}, @{Name='states'}, @{Name='bios'}, @{Name='games'}, @{Name='gog games'}
+    ) {
+        param($Name)
+        $root = New-TestFolder ('Emulator ' + $Name)
+        New-Item -ItemType Directory -Path (Join-Path $root $Name) -Force | Out-Null
+        Test-MoleInstallFolder $root | Should -BeFalse
+    }
+    It 'Keeps content markers at the root or below one wrapper: <Marker>' -TestCases @(
+        @{Marker='goggame-42.info'}, @{Marker='galaxy-2.0.db'},
+        @{Marker='OneGame\goggame-42.info'}, @{Marker='Library\steamapps'}, @{Marker='Library\libraryfolder.vdf'}
+    ) {
+        param($Marker)
+        $root = New-TestFolder ('Launcher ' + $Marker.Replace('\', '_'))
+        $path = Join-Path $root $Marker
+        New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+        if ($Marker -like '*steamapps') { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+        else { [IO.File]::WriteAllText($path,'content marker') }
+        Test-MoleInstallFolder $root | Should -BeFalse
+    }
+    It 'Retains an install folder when child identity is unknown' {
+        $root = New-TestFolder 'Unknown install'
+        $script:UnknownContentChild = Join-Path $root 'plugins'
+        New-Item -ItemType Directory -Path $script:UnknownContentChild -Force | Out-Null
+        Mock Get-MolePathSnapshot { $null } -ParameterFilter { $Path -eq $script:UnknownContentChild }
+        Test-MoleInstallFolder $root | Should -BeFalse
+    }
+    It 'Retains an incomplete bounded listing rather than accepting its early files' {
+        $root = New-TestFolder 'Large install'
+        foreach ($index in 1..257) { [IO.Directory]::CreateDirectory((Join-Path $root "component$index")) | Out-Null }
+        Test-MoleInstallFolder $root | Should -BeFalse
+    }
+    It 'Keeps ordinary installs and a single Steam game eligible' {
+        $root = New-TestFolder 'Ordinary'
+        foreach ($name in @('program.dll','goggame-not-info.txt','galaxy-2.0.db.backup')) { [IO.File]::WriteAllText((Join-Path $root $name),'program') }
+        [IO.Directory]::CreateDirectory((Join-Path $root 'bioshelpers')) | Out-Null
+        Test-MoleInstallFolder $root | Should -BeTrue
+        $game = Join-Path $TestDrive 'SteamLibrary\steamapps\common\OneGame'
+        [IO.Directory]::CreateDirectory($game) | Out-Null
+        Test-MoleInstallFolder $game | Should -BeTrue
+    }
+    It 'Rechecks content in the existing final leftover ownership guard' {
+        $root = New-TestFolder 'Content appears later'
+        $app = [pscustomobject]@{RegistryKey='selected';MergedKeys=@()}
+        Mock Test-UninstallEntryGone { $true }
+        Mock Get-MoleInstallOwners { @{Complete=$true;Owners=@()} }
+        Test-MoleLeftoverOwnership $root $app | Should -BeTrue
+        [IO.Directory]::CreateDirectory((Join-Path $root 'saves')) | Out-Null
+        Test-MoleLeftoverOwnership $root $app | Should -BeFalse
+    }
+}
+
 Describe "Uninstall entry removal check" {
     It "Treats a missing key as removed" {
         $root = New-TestUninstallKey -Name "parent" -Values @{}
@@ -783,6 +836,19 @@ Describe 'Leftover install folder ownership' {
         $script:Owners = @(@{ Path = $script:SharedFolder; Key = 'duplicate-key' })
         Uninstall-SelectedApps @($script:SelectedApp)
         Should -Invoke Remove-SafeItem -Times 0 -Exactly
+    }
+    It 'Retains game content that appears at the final removal boundary' {
+        $script:SelectedApp.InstallLocation = New-TestFolder 'Late game content'
+        $script:GuardResult = $true
+        Mock Remove-SafeItem {
+            param($Path, $Guard)
+            [IO.Directory]::CreateDirectory((Join-Path $Path 'saves')) | Out-Null
+            if ($null -ne $Guard) { $script:GuardResult = & $Guard $Path }
+            return $false
+        }
+        Uninstall-SelectedApps @($script:SelectedApp)
+        Should -Invoke Remove-SafeItem -Times 1 -Exactly
+        $script:GuardResult | Should -BeFalse
     }
     It 'Rechecks ownership in the final removal guard' {
         $script:GuardResult = $true

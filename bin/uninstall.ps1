@@ -141,6 +141,43 @@ function Get-NormalizedFolderPath {
     return $text
 }
 
+function Test-MoleInstallContentFree {
+    param([string]$Path)
+
+    # Registered install folders can also hold a portable emulator or game library.
+    # Inspect the root and immediate children completely; uncertainty retains the folder.
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $folders = [Collections.Generic.List[string]]::new()
+    $folders.Add($Path)
+    $entries = 0
+    try {
+        for ($index = 0; $index -lt $folders.Count; $index++) {
+            $folder = $folders[$index]
+            $snapshot = Get-MolePathSnapshot -Path $folder
+            if ($null -eq $snapshot) { return $false }
+            $enumerator = ([IO.DirectoryInfo]::new($folder)).EnumerateFileSystemInfos().GetEnumerator()
+            try {
+                while ($enumerator.MoveNext()) {
+                    $entries++
+                    if ($entries -gt 4096 -or $clock.ElapsedMilliseconds -gt 2000) { return $false }
+                    $entry = $enumerator.Current
+                    if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                    if ($entry.Attributes -band [IO.FileAttributes]::Directory) {
+                        if ($entry.Name -in @('roms', 'saves', 'states', 'bios', 'games', 'gog games', 'steamapps')) { return $false }
+                        if ($index -eq 0) {
+                            if ($folders.Count -ge 257) { return $false }
+                            $folders.Add($entry.FullName)
+                        }
+                    } elseif ($entry.Name -like 'goggame-*.info' -or
+                        $entry.Name -in @('galaxy-2.0.db', 'libraryfolder.vdf')) { return $false }
+                }
+            } finally { $enumerator.Dispose() }
+            if (-not (Test-MolePathSnapshot -Snapshot $snapshot)) { return $false }
+        }
+        return ($clock.ElapsedMilliseconds -le 2000)
+    } catch { return $false }
+}
+
 # Whether a registered InstallLocation can be one app's folder and so may be removed as
 # a leftover: never a drive root, Windows, the Users folder or a profile, a container
 # (Program Files, ProgramData, AppData and its roots) or a folder many apps share.
@@ -218,7 +255,7 @@ function Test-MoleInstallFolder {
         }
     }
 
-    return (Test-Path -LiteralPath $folder -PathType Container)
+    return ((Test-Path -LiteralPath $folder -PathType Container) -and (Test-MoleInstallContentFree -Path $folder))
 }
 
 # Read ownership separately from the display inventory: hidden components and
