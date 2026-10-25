@@ -471,7 +471,9 @@ function Test-DiskHealth {
 
     try {
         Start-Spinner "Checking disk health..."
-        try { $disks = @(Get-PhysicalDisk -ErrorAction Stop) } finally { Stop-Spinner }
+        try { $disks = @(Get-PhysicalDisk -ErrorAction Stop) }
+        catch { $disks = @() }
+        finally { Stop-Spinner }
         # If Windows cannot map the written volume, retain the conservative
         # all-disks verdict. A known unrelated disk must not block this drive.
         $targetDisks = @()
@@ -480,6 +482,11 @@ function Test-DiskHealth {
                 Get-Disk -ErrorAction Stop)
         }
         catch { $targetDisks = @() }
+        # Independent target evidence remains useful when the display inventory fails.
+        if ($disks.Count -eq 0) {
+            $disks = $targetDisks
+            if ($disks.Count -eq 0) { Write-Host "  $esc[90mCould not check disk health$esc[0m" }
+        }
         $targetProblem = $false
         foreach ($disk in $disks) {
             $status = $disk.HealthStatus

@@ -134,6 +134,20 @@ Describe "mo optimize steps" {
         Should -Invoke Optimize-Volume -Times 1 -Exactly
     }
 
+    It 'Still checks the target disk when physical inventory fails: <Health>' -TestCases @(
+        @{Health='Unhealthy';Writes=0},@{Health='Warning';Writes=0},@{Health='Healthy';Writes=1},@{Health='Unknown';Writes=1}
+    ) {
+        param($Health,$Writes)
+        $DryRun=$false; $ShowHelp=$false; $DebugMode=$false
+        Mock Get-PhysicalDisk { throw 'storage inventory unavailable' }
+        Mock Get-Partition { [pscustomobject]@{DriveLetter='C';DiskNumber=0} }
+        $script:TargetHealthFixture = $Health
+        Mock Get-Disk { [pscustomobject]@{FriendlyName='Target disk';HealthStatus=$script:TargetHealthFixture} }
+        Main 6>$null
+        Should -Invoke Get-Disk -Times 1 -Exactly
+        Should -Invoke Optimize-Volume -Times $Writes -Exactly
+    }
+
     It 'Unknown disk health does not invent a critical failure' {
         Mock Get-PhysicalDisk { [pscustomobject]@{ DeviceId=0; FriendlyName='RAID'; HealthStatus='Unknown' } }
         $output = Test-DiskHealth 6>&1 | Out-String
