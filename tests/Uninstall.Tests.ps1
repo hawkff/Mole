@@ -34,6 +34,7 @@ BeforeAll {
         function Invoke-MoleUninstallProcess { param($FilePath, $ArgumentList) }
     }
 
+    $script:DeclaredCacheName = Split-Path -Leaf $script:AppCacheFile
     $script:CacheDir = Join-Path $TestDrive "cache"
     $script:AppCacheFile = Join-Path $script:CacheDir "apps.json"
 
@@ -247,13 +248,18 @@ Describe "Install folder eligibility" {
 }
 
 Describe 'Generic game content in install folders' {
+    BeforeEach {
+        Mock Test-UninstallEntryGone { $true }
+        Mock Get-MoleInstallOwners { @{Complete=$true;Owners=@()} }
+        $script:ContentApp = [pscustomobject]@{RegistryKey='selected';MergedKeys=@()}
+    }
     It 'Keeps a content folder <Name> inside an otherwise ordinary install' -TestCases @(
         @{Name='roms'}, @{Name='saves'}, @{Name='states'}, @{Name='bios'}, @{Name='games'}, @{Name='gog games'}
     ) {
         param($Name)
         $root = New-TestFolder ('Emulator ' + $Name)
         New-Item -ItemType Directory -Path (Join-Path $root $Name) -Force | Out-Null
-        Test-MoleInstallFolder $root | Should -BeFalse
+        Test-MoleLeftoverOwnership $root $script:ContentApp | Should -BeFalse
     }
     It 'Keeps content markers at the root or below one wrapper: <Marker>' -TestCases @(
         @{Marker='goggame-42.info'}, @{Marker='galaxy-2.0.db'},
@@ -265,28 +271,28 @@ Describe 'Generic game content in install folders' {
         New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
         if ($Marker -like '*steamapps') { New-Item -ItemType Directory -Path $path -Force | Out-Null }
         else { [IO.File]::WriteAllText($path,'content marker') }
-        Test-MoleInstallFolder $root | Should -BeFalse
+        Test-MoleLeftoverOwnership $root $script:ContentApp | Should -BeFalse
     }
     It 'Retains an install folder when child identity is unknown' {
         $root = New-TestFolder 'Unknown install'
         $script:UnknownContentChild = Join-Path $root 'plugins'
         New-Item -ItemType Directory -Path $script:UnknownContentChild -Force | Out-Null
         Mock Get-MolePathSnapshot { $null } -ParameterFilter { $Path -eq $script:UnknownContentChild }
-        Test-MoleInstallFolder $root | Should -BeFalse
+        Test-MoleLeftoverOwnership $root $script:ContentApp | Should -BeFalse
     }
     It 'Retains an incomplete bounded listing rather than accepting its early files' {
         $root = New-TestFolder 'Large install'
         foreach ($index in 1..257) { [IO.Directory]::CreateDirectory((Join-Path $root "component$index")) | Out-Null }
-        Test-MoleInstallFolder $root | Should -BeFalse
+        Test-MoleLeftoverOwnership $root $script:ContentApp | Should -BeFalse
     }
     It 'Keeps ordinary installs and a single Steam game eligible' {
         $root = New-TestFolder 'Ordinary'
         foreach ($name in @('program.dll','goggame-not-info.txt','galaxy-2.0.db.backup')) { [IO.File]::WriteAllText((Join-Path $root $name),'program') }
         [IO.Directory]::CreateDirectory((Join-Path $root 'bioshelpers')) | Out-Null
-        Test-MoleInstallFolder $root | Should -BeTrue
+        Test-MoleLeftoverOwnership $root $script:ContentApp | Should -BeTrue
         $game = Join-Path $TestDrive 'SteamLibrary\steamapps\common\OneGame'
         [IO.Directory]::CreateDirectory($game) | Out-Null
-        Test-MoleInstallFolder $game | Should -BeTrue
+        Test-MoleLeftoverOwnership $game $script:ContentApp | Should -BeTrue
     }
     It 'Rechecks content in the existing final leftover ownership guard' {
         $root = New-TestFolder 'Content appears later'
@@ -578,6 +584,75 @@ Describe "Scanning installed apps" {
         if (Test-Path -LiteralPath $script:AppCacheFile) { Remove-Item -LiteralPath $script:AppCacheFile }
     }
 
+    It 'Does not reuse the v5 inventory with lost install identities and Game Bar' {
+        $savedCache = $script:AppCacheFile
+        try {
+            New-Item -ItemType Directory -Path $script:CacheDir -Force | Out-Null
+            $script:AppCacheFile = Join-Path $script:CacheDir $script:DeclaredCacheName
+            @([pscustomobject]@{Name='Stale Game Bar';Source='WindowsStore';PackageFullName='Microsoft.XboxGamingOverlay_1.0.0.0_x64__abc'}) |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $script:CacheDir 'app_scan_cache_v5.json') -Encoding UTF8
+            @(Get-InstalledApplications -Quiet).Count | Should -Be 0
+            Should -Invoke Get-AppxPackage -Times 1 -Exactly
+        }
+        finally { $script:AppCacheFile = $savedCache }
+    }
+
+    It 'Preserves distinct registered identities when <ProtectedCount> installs contain saves' -TestCases @(@{ProtectedCount=1},@{ProtectedCount=2}) {
+        param($ProtectedCount)
+        $first = New-TestFolder "Identity $ProtectedCount A"
+        $second = New-TestFolder "Identity $ProtectedCount B"
+        [IO.Directory]::CreateDirectory((Join-Path $first 'saves')) | Out-Null
+        if ($ProtectedCount -eq 2) { [IO.Directory]::CreateDirectory((Join-Path $second 'saves')) | Out-Null }
+        $script:RegistryFixtures = @(foreach ($folder in @($first,$second)) {
+            [pscustomobject]@{PSPath="HKLM-test\$folder";PSChildName=$folder;DisplayName='Same emulator';DisplayVersion='1.0';Publisher='Contoso';InstallLocation=$folder;UninstallString="`"$folder\uninstall.exe`"";EstimatedSize=1024}
+        })
+        $apps = @(Get-InstalledApplications -ForceRescan -Quiet)
+        $apps.Count | Should -Be 2
+        @($apps.InstallLocation | Sort-Object) | Should -Be @($first,$second | Sort-Object)
+    }
+
+    It 'Keeps two distinct registered Steam library roots without measuring or removing either' {
+        $folders = @((New-TestFolder 'Registered Steam A'),(New-TestFolder 'Registered Steam B'))
+        $script:RegistryFixtures = @(foreach ($folder in $folders) {
+            [IO.Directory]::CreateDirectory((Join-Path $folder 'steamapps')) | Out-Null
+            [pscustomobject]@{PSPath="HKLM-test\$folder";PSChildName=$folder;DisplayName='Same client';DisplayVersion='1.0';Publisher='Contoso';InstallLocation=$folder;UninstallString="`"$folder\uninstall.exe`"";EstimatedSize=70987979}
+        })
+        Mock Get-PathSizeKB { throw 'Protected containers must not be measured' }
+        $apps = @(Get-InstalledApplications -ForceRescan -Quiet)
+        $apps.Count | Should -Be 2
+        @($apps.InstallLocation | Sort-Object) | Should -Be @($folders | Sort-Object)
+        foreach ($app in $apps) { Test-MoleLeftoverOwnership $app.InstallLocation $app | Should -BeFalse }
+        Should -Invoke Get-PathSizeKB -Times 0 -Exactly
+    }
+
+    It 'Retains <Kind> registration identity without recursive measurement or leftover removal' -TestCases @(
+        @{Kind='shared root';Variable='ProgramFiles'},@{Kind='system root';Variable='SystemRoot'}
+    ) {
+        param($Kind,$Variable)
+        $folder = [Environment]::GetEnvironmentVariable($Variable)
+        $script:RegistryFixtures = @([pscustomobject]@{PSPath='HKLM-test\container';PSChildName='container';DisplayName='Container app';InstallLocation=$folder;UninstallString='C:\fixture\uninstall.exe';EstimatedSize=70987979})
+        Mock Get-PathSizeKB { throw 'Protected containers must not be measured' }
+        $app = @(Get-InstalledApplications -ForceRescan -Quiet)[0]
+        $app.InstallLocation | Should -Be (Get-NormalizedFolderPath $folder)
+        $app.SizeKB | Should -Be 70987979
+        Test-MoleLeftoverOwnership $folder $app | Should -BeFalse
+        Should -Invoke Get-PathSizeKB -Times 0 -Exactly
+    }
+
+    It 'Measures an outlier estimate even when personal content prevents leftover removal' {
+        $folder = New-TestFolder 'Measured with saves'
+        [IO.Directory]::CreateDirectory((Join-Path $folder 'saves')) | Out-Null
+        $script:RegistryFixtures = @([pscustomobject]@{PSPath='HKLM-test\measured';PSChildName='measured';DisplayName='Measured emulator';InstallLocation=$folder;UninstallString="`"$folder\uninstall.exe`"";EstimatedSize=70987979})
+        $measured = Get-PathSizeKB $folder
+        $app = @(Get-InstalledApplications -ForceRescan -Quiet)[0]
+        $app.InstallLocation | Should -Be $folder
+        $app.SizeKB | Should -Be $measured
+        $app.SizeChecked | Should -BeTrue
+        Mock Test-UninstallEntryGone { $true }
+        Mock Get-MoleInstallOwners { @{Complete=$true;Owners=@()} }
+        Test-MoleLeftoverOwnership $folder $app | Should -BeFalse
+    }
+
     It "Shows a RustDesk-like outlier size as measured, once, beside its duplicate key (#1717)" {
         $folder = New-TestFolder -Name "RustDesk"
         $code = "{3BF1D48C-7A7B-4E4F-9D1F-0123456789AB}"
@@ -699,7 +774,7 @@ Describe "Scanning installed apps" {
         Mock Get-AppxPackage {
             $names = @(
                 "Microsoft.WindowsStore", "Microsoft.StorePurchaseApp", "Microsoft.DesktopAppInstaller",
-                "Microsoft.SecHealthUI", "Microsoft.GetHelp", "Microsoft.Windows.Photos", "Contoso.Notes"
+                "Microsoft.SecHealthUI", "Microsoft.GetHelp", "Microsoft.XboxGamingOverlay", "Microsoft.Windows.Photos", "Contoso.Notes"
             )
             foreach ($name in $names) {
                 [PSCustomObject]@{
@@ -1157,5 +1232,82 @@ Describe "Quiet inventory scan" {
         $apps[0].Name | Should -BeExactly "Quiet Tool"
         Should -Invoke Write-Info -Times 0 -Exactly
         Should -Invoke Write-Progress -Times 0 -Exactly
+    }
+}
+
+Describe 'Store package eligibility at the removal boundary' {
+    BeforeEach {
+        Set-DryRunMode -Enabled $false
+        Mock Write-Host {}
+        Mock Show-SummaryBlock {}
+        Mock Write-MoleOperation {}
+        Mock Remove-AppxPackage {}
+        Mock Invoke-MoleUninstallProcess { throw 'No vendor uninstaller is allowed' }
+        $script:CurrentStorePackage = [pscustomobject]@{
+            Name='Contoso.Notes';PackageFullName='Contoso.Notes_1.0.0.0_x64__abc';SignatureKind='Store'
+            IsFramework=$false;IsResourcePackage=$false;IsBundle=$false
+            InstallLocation='C:\Program Files\WindowsApps\Contoso.Notes_1.0.0.0_x64__abc'
+        }
+        Mock Get-AppxPackage { $script:CurrentStorePackage }
+        Mock Get-AppxPackageManifest { $null }
+        $script:SelectedStoreApp = [pscustomobject]@{Name='Cached friendly name';Source='WindowsStore';PackageFullName=$script:CurrentStorePackage.PackageFullName}
+    }
+    AfterEach { Set-DryRunMode -Enabled $false }
+
+    It 'Refuses current Game Bar metadata even with an old friendly name, preview=<Preview>' -TestCases @(@{Preview=$true},@{Preview=$false}) {
+        param($Preview)
+        Set-DryRunMode -Enabled $Preview
+        $script:CurrentStorePackage.Name = 'Microsoft.XboxGamingOverlay'
+        $script:CurrentStorePackage.PackageFullName = 'Microsoft.XboxGamingOverlay_1.0.0.0_x64__abc'
+        $script:CurrentStorePackage.InstallLocation = 'C:\Program Files\WindowsApps\Microsoft.XboxGamingOverlay_1.0.0.0_x64__abc'
+        $script:SelectedStoreApp.PackageFullName = $script:CurrentStorePackage.PackageFullName
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+        if ($Preview) {
+            Should -Invoke Write-MoleOperation -Times 0 -Exactly
+            Should -Invoke Show-SummaryBlock -Times 1 -Exactly -ParameterFilter { $Details -contains 'Would uninstall: 0' }
+        }
+        else { Should -Invoke Write-MoleOperation -Times 0 -Exactly -ParameterFilter { $Action -eq 'UNINSTALLED' } }
+    }
+    It 'Retains a stale Store selection when current evidence is <State>' -TestCases @(@{State='missing'},@{State='unreadable'},@{State='system'},@{State='different version'}) {
+        param($State)
+        switch ($State) {
+            'missing' { Mock Get-AppxPackage { @() } }
+            'unreadable' { Mock Get-AppxPackage { throw 'inventory unavailable' } }
+            'system' { $script:CurrentStorePackage.SignatureKind='System' }
+            'different version' { $script:CurrentStorePackage.PackageFullName='Contoso.Notes_2.0.0.0_x64__abc' }
+        }
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+    }
+    It 'Does not preview a Store package when current inventory is unreadable' {
+        Set-DryRunMode -Enabled $true
+        Mock Get-AppxPackage { throw 'inventory unavailable' }
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+        Should -Invoke Write-MoleOperation -Times 0 -Exactly
+        Should -Invoke Show-SummaryBlock -Times 1 -Exactly -ParameterFilter { $Details -contains 'Would uninstall: 0' }
+    }
+    It 'Previews an eligible ordinary Store package without writing' {
+        Set-DryRunMode -Enabled $true
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+        Should -Invoke Write-MoleOperation -Times 0 -Exactly
+        Should -Invoke Show-SummaryBlock -Times 1 -Exactly -ParameterFilter { $Details -contains 'Would uninstall: 1' }
+    }
+    It 'Rechecks an explicit sparse manifest even when the cached full identity still matches' {
+        Mock Get-AppxPackageManifest { [xml]'<Package><Properties><AllowExternalContent>true</AllowExternalContent></Properties></Package>' }
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+    }
+    It 'Preserves discovery policy for an unreadable manifest on an ordinary Store package' {
+        Mock Get-AppxPackageManifest { throw 'manifest unreadable' }
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 1 -Exactly
+    }
+    It 'Still removes an exactly matched ordinary Store app' {
+        Uninstall-SelectedApps @($script:SelectedStoreApp)
+        Should -Invoke Remove-AppxPackage -Times 1 -Exactly -ParameterFilter { $Package -eq 'Contoso.Notes_1.0.0.0_x64__abc' }
+        Should -Invoke Get-AppxPackage -Times 1 -Exactly -ParameterFilter { $Name -eq 'Contoso.Notes' }
     }
 }

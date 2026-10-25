@@ -24,7 +24,7 @@ BeforeAll {
     }
 
     Import-ScriptFunction -Script (Join-Path $script:WindowsDir "bin\uninstall.ps1") -Names @(
-        "Get-UninstallMethodDescription", "Uninstall-SelectedApps", "Invoke-MoleUninstallProcess", "Get-MoleProperty", "Get-NormalizedFolderPath",
+        "Get-UninstallMethodDescription", "Uninstall-SelectedApps", "Test-MoleStoreRemovalAllowed", "Invoke-MoleUninstallProcess", "Get-MoleProperty", "Get-NormalizedFolderPath",
         "Test-MoleInstallContentFree", "Test-MoleInstallFolder", "Get-MoleInstallOwners", "Test-MoleLeftoverOwnership", "Test-UninstallEntryGone", "Get-MsiProductCode", "Split-UninstallCommand", "Test-InnoUninstaller",
         "Test-NsisUninstaller", "Test-SteamClientUninstaller", "Get-UninstallLaunch"
     )
@@ -45,6 +45,7 @@ Describe "mo uninstall --dry-run" {
         Mock Get-MoleInstallOwners { @{ Complete = $true; Owners = @() } }
         Mock Invoke-MoleUninstallProcess { throw "Uninstaller must not run in a dry run" }
         Mock Remove-AppxPackage { throw "Remove-AppxPackage must not run in a dry run" }
+        Mock Test-MoleStoreRemovalAllowed { $true }
     }
 
     It "Runs no uninstaller for MSI, EXE or Store apps" {

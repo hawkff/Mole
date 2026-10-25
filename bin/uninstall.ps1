@@ -41,7 +41,8 @@ $script:CacheDir = "$env:USERPROFILE\.cache\mole"
 # v4: written as UTF-8. v3 used the ANSI code page, which turned non-ASCII
 # app names into question marks, so a v3 file is not read as UTF-8.
 # v5: sparse Store packages a desktop app registers are no longer listed.
-$script:AppCacheFile = "$script:CacheDir\app_scan_cache_v5.json"
+# v6: preserve registered identities independently of content retention; protect Game Bar.
+$script:AppCacheFile = "$script:CacheDir\app_scan_cache_v6.json"
 $script:CacheTTLHours = 24
 
 # A vendor EstimatedSize above this is measured against the install folder (#1717).
@@ -111,6 +112,7 @@ $script:ProtectedPackageNames = @(
     "Microsoft.DesktopAppInstaller"
     "Microsoft.SecHealthUI"
     "Microsoft.GetHelp"
+    "Microsoft.XboxGamingOverlay"
 )
 
 # ============================================================================
@@ -178,9 +180,9 @@ function Test-MoleInstallContentFree {
     } catch { return $false }
 }
 
-# Whether a registered InstallLocation can be one app's folder and so may be removed as
-# a leftover: never a drive root, Windows, the Users folder or a profile, a container
-# (Program Files, ProgramData, AppData and its roots) or a folder many apps share.
+# Static eligibility for display measurement and a possible install leftover.
+# This never authorizes deletion: Test-MoleLeftoverOwnership also checks content
+# and current owners. Reject drive roots, profiles and shared/system containers.
 function Test-MoleInstallFolder {
     param([string]$Path)
 
@@ -255,7 +257,7 @@ function Test-MoleInstallFolder {
         }
     }
 
-    return ((Test-Path -LiteralPath $folder -PathType Container) -and (Test-MoleInstallContentFree -Path $folder))
+    return (Test-Path -LiteralPath $folder -PathType Container)
 }
 
 # Read ownership separately from the display inventory: hidden components and
@@ -300,6 +302,8 @@ function Test-MoleLeftoverOwnership {
     param([string]$Path, $App, [switch]$Preview)
 
     if (-not (Test-MoleInstallFolder $Path)) { return $false }
+    # Content retention is removal authority, not registered identity or display size.
+    if (-not (Test-MoleInstallContentFree $Path)) { return $false }
     $folder = Get-NormalizedFolderPath $Path
     $key = [string](Get-MoleProperty $App 'RegistryKey')
     $mergedKeys = @(Get-MoleProperty $App 'MergedKeys')
@@ -393,12 +397,12 @@ function ConvertFrom-UninstallEntry {
     $displayName = $displayName.Trim()
     if (Test-ProtectedApp $displayName) { return $null }
 
-    $installFolder = $null
-    $installLocation = [string](Get-MoleProperty $Entry 'InstallLocation')
-    if (Test-MoleInstallFolder -Path $installLocation) {
-        $installFolder = Get-NormalizedFolderPath -Path $installLocation
-    }
-    $size = Get-RegistryAppSize -EstimatedKB (Get-EstimatedSizeKB $Entry) -InstallFolder $installFolder
+    # A protected registered directory still distinguishes installations. Only
+    # display measurement and leftover removal require their own eligibility.
+    $installFolder = Get-NormalizedFolderPath -Path ([string](Get-MoleProperty $Entry 'InstallLocation'))
+    $sizeFolder = $null
+    if (Test-MoleInstallFolder -Path $installFolder) { $sizeFolder = $installFolder }
+    $size = Get-RegistryAppSize -EstimatedKB (Get-EstimatedSizeKB $Entry) -InstallFolder $sizeFolder
 
     $installDate = $null
     try {
@@ -509,6 +513,26 @@ function Test-ListableAppxPackage {
         return $false
     }
     return $true
+}
+
+# Cached display rows never authorize removal. Read the exact current package,
+# narrowing the provider query by its literal name, then require the full identity.
+function Test-MoleStoreRemovalAllowed {
+    param([string]$PackageFullName)
+
+    if ([string]::IsNullOrWhiteSpace($PackageFullName)) { return $false }
+    $name = ($PackageFullName -split '_', 2)[0]
+    try {
+        $packages = @(Get-AppxPackage -Name ([WildcardPattern]::Escape($name)) -ErrorAction Stop |
+            Where-Object { [string](Get-MoleProperty $_ 'PackageFullName') -eq $PackageFullName })
+        if ($packages.Count -ne 1) { return $false }
+        if (-not (Test-ListableAppxPackage -Package $packages[0])) { return $false }
+        $manifest = $null
+        try { $manifest = Get-AppxPackageManifest -Package $PackageFullName -ErrorAction Stop }
+        catch { } # Match discovery: an unreadable manifest does not prove sparse integration.
+        return (-not (Test-SparseAppxManifest -Manifest $manifest))
+    }
+    catch { return $false }
 }
 
 # A package with external location (a sparse package) is shell integration a desktop
@@ -1246,7 +1270,10 @@ function Uninstall-SelectedApps {
         Write-Host ""
         Write-Host "$esc[1;35mUninstall preview$esc[0m - no changes made"
         Write-Host ""
+        $previewCount = 0
         foreach ($app in $Apps) {
+            if ($app.Source -eq "WindowsStore" -and -not (Test-MoleStoreRemovalAllowed -PackageFullName ([string](Get-MoleProperty $app 'PackageFullName')))) { continue }
+            $previewCount++
             Write-Host "$esc[34m$($script:Icons.Arrow)$esc[0m $($app.Name)"
             Write-Host "  $esc[90mWould uninstall with $(Get-UninstallMethodDescription -App $app)$esc[0m"
             $folder = [string](Get-MoleProperty $app 'InstallLocation')
@@ -1255,7 +1282,7 @@ function Uninstall-SelectedApps {
                 $null = Remove-SafeItem -Path $folder -Description "Leftover files to Recycle Bin" -Recurse -Recycle -Guard $guard
             }
         }
-        Show-SummaryBlock -Heading 'Dry run complete - no changes made' -Details @("Would uninstall: $(@($Apps).Count)")
+        Show-SummaryBlock -Heading 'Dry run complete - no changes made' -Details @("Would uninstall: $previewCount")
         return
     }
 
@@ -1268,6 +1295,10 @@ function Uninstall-SelectedApps {
     $remainingCount = 0
 
     foreach ($app in $Apps) {
+        if ($app.Source -eq "WindowsStore" -and -not (Test-MoleStoreRemovalAllowed -PackageFullName ([string](Get-MoleProperty $app 'PackageFullName')))) {
+            Write-MoleOperation -Action "SKIPPED" -Path $app.Name -Detail (Get-UninstallOperationDetail -App $app -Outcome "current Store package not eligible")
+            continue
+        }
         Write-Host "$esc[34m$($script:Icons.Arrow)$esc[0m Uninstalling: $($app.Name)" -NoNewline
 
         $launch = $null
