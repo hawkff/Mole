@@ -576,7 +576,7 @@ Describe "Scanning installed apps" {
         Mock Write-Info {}
         Mock Write-Progress {}
         Mock Get-AppxPackage { @() }
-        Mock Get-AppxPackageManifest { $null }
+        Mock Get-AppxPackageManifest { [xml]'<Package><Properties /></Package>' }
         $script:RegistryFixtures = @()
         Mock Get-ItemProperty {
             if ("$Path" -like "HKLM:\SOFTWARE\Microsoft\*") { $script:RegistryFixtures }
@@ -816,7 +816,7 @@ Describe "Scanning installed apps" {
 
         $apps = @(Get-InstalledApplications -ForceRescan)
 
-        @($apps | ForEach-Object { $_.Name } | Sort-Object) | Should -Be @("Contoso.Notes", "Contoso.Unread")
+        @($apps | ForEach-Object { $_.Name } | Sort-Object) | Should -Be @("Contoso.Notes")
     }
 }
 
@@ -1030,7 +1030,7 @@ Describe 'Uninstall rendered regression' {
         Mock Write-Progress {}
         Mock Get-ItemProperty { @() } -ParameterFilter { "$Path" -like 'HK*' }
         Mock Get-MolePathSnapshot { $null }
-        Mock Get-AppxPackageManifest { $null }
+        Mock Get-AppxPackageManifest { [xml]'<Package><Properties /></Package>' }
         Mock Get-AppxPackage {
             [pscustomobject]@{Name='Contoso.Notes';PackageFullName='Contoso.Notes_1.0_x64__abc';
                 Publisher='CN=Test';Version='1.0';IsFramework=$false;IsResourcePackage=$false;
@@ -1216,7 +1216,7 @@ Describe "Quiet inventory scan" {
         Mock Write-Info { throw "a quiet scan must not write to the host" }
         Mock Write-Progress { throw "a quiet scan must not report progress" }
         Mock Get-AppxPackage { @() }
-        Mock Get-AppxPackageManifest { $null }
+        Mock Get-AppxPackageManifest { [xml]'<Package><Properties /></Package>' }
         Mock Get-ItemProperty {
             if ("$Path" -like "HKLM:\SOFTWARE\Microsoft\*") {
                 [PSCustomObject]@{ PSPath = "HKLM-test\quiet"; PSChildName = "quiet"; DisplayName = "Quiet Tool"; UninstallString = "C:\q\u.exe"; EstimatedSize = 1024 }
@@ -1249,7 +1249,7 @@ Describe 'Store package eligibility at the removal boundary' {
             InstallLocation='C:\Program Files\WindowsApps\Contoso.Notes_1.0.0.0_x64__abc'
         }
         Mock Get-AppxPackage { $script:CurrentStorePackage }
-        Mock Get-AppxPackageManifest { $null }
+        Mock Get-AppxPackageManifest { [xml]'<Package><Properties /></Package>' }
         $script:SelectedStoreApp = [pscustomobject]@{Name='Cached friendly name';Source='WindowsStore';PackageFullName=$script:CurrentStorePackage.PackageFullName}
     }
     AfterEach { Set-DryRunMode -Enabled $false }
@@ -1300,12 +1300,36 @@ Describe 'Store package eligibility at the removal boundary' {
         Uninstall-SelectedApps @($script:SelectedStoreApp)
         Should -Invoke Remove-AppxPackage -Times 0 -Exactly
     }
-    It 'Preserves discovery policy for an unreadable manifest on an ordinary Store package' {
-        Mock Get-AppxPackageManifest { throw 'manifest unreadable' }
+    It 'Retains a Store package with unknown manifest evidence <Evidence>, preview=<Preview>' -TestCases @(
+        @{ Evidence='unreadable'; Preview=$false }, @{ Evidence='unreadable'; Preview=$true },
+        @{ Evidence='empty'; Preview=$false }, @{ Evidence='empty'; Preview=$true },
+        @{ Evidence='non-XML'; Preview=$false }, @{ Evidence='non-XML'; Preview=$true },
+        @{ Evidence='missing properties'; Preview=$false }, @{ Evidence='missing properties'; Preview=$true },
+        @{ Evidence='invalid external flag'; Preview=$false }, @{ Evidence='invalid external flag'; Preview=$true }
+    ) {
+        param($Evidence, $Preview)
+        Set-DryRunMode -Enabled $Preview
+        switch ($Evidence) {
+            'unreadable' { Mock Get-AppxPackageManifest { throw 'manifest unreadable' } }
+            'empty' { Mock Get-AppxPackageManifest { $null } }
+            'non-XML' { Mock Get-AppxPackageManifest { 'not a manifest' } }
+            'missing properties' { Mock Get-AppxPackageManifest { [xml]'<Package />' } }
+            'invalid external flag' { Mock Get-AppxPackageManifest { [xml]'<Package><Properties><AllowExternalContent>unknown</AllowExternalContent></Properties></Package>' } }
+        }
         Uninstall-SelectedApps @($script:SelectedStoreApp)
-        Should -Invoke Remove-AppxPackage -Times 1 -Exactly
+        Should -Invoke Remove-AppxPackage -Times 0 -Exactly
+        Should -Invoke Write-MoleOperation -Times 0 -Exactly -ParameterFilter { $Action -eq 'UNINSTALLED' }
+        if ($Preview) {
+            Should -Invoke Show-SummaryBlock -Times 1 -Exactly -ParameterFilter { $Details -contains 'Would uninstall: 0' }
+        }
     }
-    It 'Still removes an exactly matched ordinary Store app' {
+    It 'Still removes an exactly matched ordinary Store app, external flag=<Flag>' -TestCases @(
+        @{ Flag='' }, @{ Flag='false' }, @{ Flag='0' }
+    ) {
+        param($Flag)
+        $external = if ($Flag) { "<AllowExternalContent>$Flag</AllowExternalContent>" } else { '' }
+        $script:OrdinaryManifest = [xml]"<Package><Properties>$external</Properties></Package>"
+        Mock Get-AppxPackageManifest { $script:OrdinaryManifest }
         Uninstall-SelectedApps @($script:SelectedStoreApp)
         Should -Invoke Remove-AppxPackage -Times 1 -Exactly -ParameterFilter { $Package -eq 'Contoso.Notes_1.0.0.0_x64__abc' }
         Should -Invoke Get-AppxPackage -Times 1 -Exactly -ParameterFilter { $Name -eq 'Contoso.Notes' }

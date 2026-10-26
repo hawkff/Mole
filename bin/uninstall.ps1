@@ -42,7 +42,8 @@ $script:CacheDir = "$env:USERPROFILE\.cache\mole"
 # app names into question marks, so a v3 file is not read as UTF-8.
 # v5: sparse Store packages a desktop app registers are no longer listed.
 # v6: preserve registered identities independently of content retention; protect Game Bar.
-$script:AppCacheFile = "$script:CacheDir\app_scan_cache_v6.json"
+# v7: require readable manifest evidence before listing a Store package.
+$script:AppCacheFile = "$script:CacheDir\app_scan_cache_v7.json"
 $script:CacheTTLHours = 24
 
 # A vendor EstimatedSize above this is measured against the install folder (#1717).
@@ -527,25 +528,25 @@ function Test-MoleStoreRemovalAllowed {
             Where-Object { [string](Get-MoleProperty $_ 'PackageFullName') -eq $PackageFullName })
         if ($packages.Count -ne 1) { return $false }
         if (-not (Test-ListableAppxPackage -Package $packages[0])) { return $false }
-        $manifest = $null
-        try { $manifest = Get-AppxPackageManifest -Package $PackageFullName -ErrorAction Stop }
-        catch { } # Match discovery: an unreadable manifest does not prove sparse integration.
-        return (-not (Test-SparseAppxManifest -Manifest $manifest))
+        $manifest = Get-AppxPackageManifest -Package $PackageFullName -ErrorAction Stop
+        return (Test-RemovableAppxManifest -Manifest $manifest)
     }
     catch { return $false }
 }
 
 # A package with external location (a sparse package) is shell integration a desktop
 # app registers, such as WinMerge's Windows 11 context menu; that app's own uninstaller
-# removes it, so it is not a separate app. An unreadable manifest keeps the package.
-function Test-SparseAppxManifest {
+# removes it, so it is not a separate app. Unknown manifest evidence retains it.
+function Test-RemovableAppxManifest {
     param($Manifest)
 
     if ($Manifest -isnot [System.Xml.XmlNode]) { return $false }
-    $node = $Manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='AllowExternalContent']")
-    if ($null -eq $node) { return $false }
+    $properties = $Manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Properties']")
+    if ($null -eq $properties) { return $false }
+    $node = $properties.SelectSingleNode("*[local-name()='AllowExternalContent']")
+    if ($null -eq $node) { return $true }
     $value = $node.InnerText.Trim()
-    return ($value -eq 'true' -or $value -eq '1')
+    return ($value -eq 'false' -or $value -eq '0')
 }
 
 # The size the menu shows: a 0B that was never measured is Unknown, not empty.
@@ -903,15 +904,15 @@ function Get-InstalledApplications {
             $name = $uwp.Name
             $manifest = $null
             try {
-                $manifest = Get-AppxPackageManifest -Package $uwp.PackageFullName -ErrorAction SilentlyContinue
+                $manifest = Get-AppxPackageManifest -Package $uwp.PackageFullName -ErrorAction Stop
                 if ($manifest.Package.Properties.DisplayName -and
                     -not $manifest.Package.Properties.DisplayName.StartsWith("ms-resource:")) {
                     $name = $manifest.Package.Properties.DisplayName
                 }
             }
             catch { }
-            if (Test-SparseAppxManifest -Manifest $manifest) {
-                Write-Debug "Skipping package with external location: $($uwp.PackageFullName)"
+            if (-not (Test-RemovableAppxManifest -Manifest $manifest)) {
+                Write-Debug "Keeping package with external or unknown manifest evidence: $($uwp.PackageFullName)"
                 continue
             }
 

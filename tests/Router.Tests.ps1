@@ -311,7 +311,7 @@ Describe "Machine-readable output through installed launcher call shapes" {
             [ordered]@{ Name = "Cached Tool"; Publisher = "Contoso"; Version = "3.0"; SizeKB = 1024; SizeHuman = "1.0MB"; SizeChecked = $true
                 InstallLocation = "C:\Tools\Cached"; RegistryKey = "HKLM-test\cached"; PackageFullName = $null; Source = "Registry" }
         )
-        [System.IO.File]::WriteAllText((Join-Path $cacheDir "app_scan_cache_v6.json"), (ConvertTo-Json -InputObject $cache -Depth 3))
+        [System.IO.File]::WriteAllText((Join-Path $cacheDir "app_scan_cache_v7.json"), (ConvertTo-Json -InputObject $cache -Depth 3))
         $saved = $env:USERPROFILE
         try {
             $env:USERPROFILE = $profile
