@@ -40,14 +40,12 @@ jobs:
           Write-Host "Go code is formatted" -ForegroundColor Green
         shell: pwsh
 
-      # Advisory until the existing findings are fixed; the version is pinned so
-      # a new linter release cannot change the result on its own.
+      # Pin the linter so a new release cannot change the gate on its own.
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
           args: --timeout 5m ./cmd/...
-        continue-on-error: true
 
       - name: Check PowerShell syntax
         run: |

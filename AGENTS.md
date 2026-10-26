@@ -108,7 +108,7 @@ Parsed command arguments are data: do not strip literal quote characters a secon
 
 ## CI
 
-- `Check`: `gofmt -l` must be clean, PowerShell syntax must parse, golangci-lint is pinned and advisory until its existing findings are fixed. CI never commits on its own.
+- `Check`: `gofmt -l` must be clean, PowerShell syntax must parse, the pinned golangci-lint check must pass. CI never commits on its own.
 - Run `actionlint` on workflow changes before pushing; a step's `shell:` cannot read the matrix, which GitHub rejects before any job starts.
 - `Validation`: Pester on both PowerShell versions, Go tests, binary build, security checks.
 - `scripts/test.ps1` requires Pester's explicit passing result with at least one passed test. Missing results, empty or entirely skipped suites and failed Go probes are not success; only an explicit `-NoGo` skips Go. Locked by `tests/TestRunner.Tests.ps1`.

@@ -32,7 +32,11 @@ func readRecycleIdentity(path string) (recycleIdentity, error) {
 	if err != nil {
 		return recycleIdentity{}, err
 	}
-	defer windows.CloseHandle(h)
+	defer func() {
+		// This handle only reads metadata: there are no writes to flush, and a
+		// close error does not invalidate the identity already read from it.
+		_ = windows.CloseHandle(h)
+	}()
 	var info windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
 		return recycleIdentity{}, err
