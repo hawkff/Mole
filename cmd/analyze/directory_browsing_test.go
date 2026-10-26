@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"os"
@@ -162,5 +163,54 @@ func TestWarmedDirectorySummaryRefreshesBeforeBrowsing(t *testing.T) {
 	m.applyEntryFilter()
 	if len(m.entries) != 1 || m.selectedEntryPath() != filepath.Join(child, "item-35") {
 		t.Fatal("cached last child is not selectable through the filter")
+	}
+}
+
+// #1710: Analyze once stopped a directory walk three levels deep and skipped
+// every folder whose name starts with a dot, so C:\ read 101 GB of 830 GB.
+// Both sizing paths must count a file six levels down inside hidden folders:
+// the folded walk (.venv) and the listing's own recursion (.config).
+func TestDirectorySizesCountDeepAndHiddenDirs(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("deep file")
+	for _, hidden := range []string{".venv", ".config"} {
+		deep := filepath.Join(root, hidden, "a", "b", "c", "d", "e")
+		if err := os.MkdirAll(deep, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(deep, "deep.txt"), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "top.txt"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	one := int64(len(content))
+
+	size, err := calculateDirSizeFast(context.Background(), root, nil, nil, nil, nil, nil)
+	if err != nil || size != 3*one {
+		t.Fatalf("calculateDirSizeFast = %d, %v; want %d", size, err, 3*one)
+	}
+
+	result, err := scanPathConcurrent(context.Background(), root, nil, new(int64), new(int64), new(int64), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalSize != 3*one {
+		t.Fatalf("scan total = %d, want %d", result.TotalSize, 3*one)
+	}
+	for _, hidden := range []string{".venv", ".config"} {
+		found := false
+		for _, entry := range result.Entries {
+			if entry.Name == hidden {
+				found = true
+				if !entry.IsDir || entry.Size != one {
+					t.Fatalf("%s row = %+v, want a directory of %d bytes", hidden, entry, one)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s is missing from the listing: %+v", hidden, result.Entries)
+		}
 	}
 }

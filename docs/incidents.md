@@ -38,3 +38,4 @@ record which rows it finds.
 | I-07 | 2026-10-15 | `mo update` started from a PowerShell 7 terminal could not refresh analyze and status | unknown | f8803958 | field | `Verifies the checksum without Get-FileHash (#1744)`, `Drops PowerShell 7 module folders inherited by Windows PowerShell and keeps the rest` |
 | I-08 | 2026-10-18 | The uninstall menu crashed under Windows PowerShell 5.1 when a search matched exactly one app | unknown | 0e9d06b4 | unit | `selects the only app a search matches` |
 | I-09 | 2026-10-26 | `mo.exe` could not run any command where policy blocks powershell.exe | e8fd407d | a56c6a40 | field | `TestRunPowerShellFallsBackWhenTheFirstHostCannotStart` |
+| I-10 | 2026-10-09 | `mo analyze C:\` reported 101 GB of 830 GB used: directory sizes stopped three levels deep and skipped folders whose names start with a dot | 3653900e | 4a9838af | unit | `TestDirectorySizesCountDeepAndHiddenDirs` |
