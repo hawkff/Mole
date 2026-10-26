@@ -81,6 +81,14 @@ jobs:
           python tests/e2e_harness_test.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test review gates
+        if: matrix.shell == 'pwsh'
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python tests/review_gates_test.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run Go tests
         if: matrix.shell == 'pwsh'
         run: |

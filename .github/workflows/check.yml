@@ -65,3 +65,13 @@ jobs:
         # Windows PowerShell 5.1 reads BOM-less files through the ANSI code
         # page, so parsing here also catches non-ASCII text without a BOM.
         shell: powershell
+
+      # Every incident row names real commits, a known layer and a catcher the code defines (docs/incidents.md).
+      # The checkout is shallow, so commits are only shape-checked here; a local run in a full clone resolves them.
+      - name: Check incident ledger
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python scripts/check_incidents.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        shell: pwsh
