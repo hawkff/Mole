@@ -2,6 +2,14 @@
 
 This is the handoff record for the `windows` branch of `tw93/Mole`, not the paid Windows app or the macOS CLI. Read [AGENTS.md](../AGENTS.md) for current policy and [development pitfalls](development-pitfalls.md) for reusable lessons. Git history retains individual edits; this file records completed batches and their delivery boundaries. Recheck live state before resuming work.
 
+## 2026-10-26: Residual closure
+
+Frozen source `d1ab34a2`; source repairs `3b6b0b0b` and `20d12930`. Unreadable Store manifest evidence now retains packages during discovery, preview and removal; the shared predicate accepts ordinary readable manifests and the v7 inventory cache invalidates older rows. The remaining Go metadata-handle close warning is explicitly handled, and pinned lint is now a required Check gate. [The security review](../SECURITY_AUDIT.md#residual-closure-follow-up) records the ten original limitation dispositions and the source/public-output boundary.
+
+Old-source native Pester: 142 passed, 11 failed. Repaired Uninstall, Router and UninstallWait: 205 passed with zero failures/skips on each of PowerShell 5.1.26100.9711 and 7.6.7, Pester 6.2.0. Fixtures mock Store removal; no real uninstall was performed. Full-suite launches then lost the Parallels guest execution-result channel (`PrlJob_GetRetCode: Invalid argument`). Their execution/completion is unknown, retries stopped, and no VM/network setting was changed. Do not reuse the earlier 681-test or native ARM64 Go result as current evidence. Full native-suite evidence is read independently from the exact pushed revision's Windows CI and reported at task closeout.
+
+Windows-target ARM64/AMD64 lint and builds, ARM64 vet and `actionlint` pass. macOS-hosted `go test ./...` also passes; it does not replace Windows-native execution. No release, signed package, real UAC or physical-machine acceptance is claimed.
+
 ## 2026-10-26: Whole CLI safety review
 
 Frozen source `8bff8583`, repair `34f646c2`. The whole CLI review and remaining trust/race boundaries are recorded in [SECURITY_AUDIT.md](../SECURITY_AUDIT.md). Batch file removal now checks the original file/ancestor identity again after the final owner callback; replaced targets remain in place and contribute no dry-run count. The single-item and directory paths already had this boundary. No command, flag or setting was added.

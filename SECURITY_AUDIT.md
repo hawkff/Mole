@@ -52,7 +52,7 @@ The primary risk is unintended local data loss. Relevant surfaces are automatic 
 | Disk maintenance | Target-volume health is read independently even if physical-disk inventory fails; known Warning/Unhealthy targets are retained before optimization. Battery-equipped systems require complete external-power evidence, unknown power retains the drive, and a complete empty battery inventory permits a desktop. | `tests/Optimize.Tests.ps1` |
 | Purge | Generic names require the matching project ecosystem. Git-tracked content, nested repositories and ambiguous probes retain the candidate; discovery and deletion recheck ownership. | `tests/PurgeBoundary.Tests.ps1` |
 | Application leftovers | The registered uninstaller and its tracked descendants finish first. Its wait has a fixed 30-minute ceiling; timeout stops the batch without killing the vendor or recycling leftovers. Leftover recycling requires the selected registration to be gone and a complete inventory with no same, parent or child install-folder owner. Registered path identity survives protection for merging and display, with a separate restriction on recursive measurement. Preview and the removal guard both check ownership and bounded game-content markers in registered install roots; incomplete or redirected children retain the folder. | `tests/Uninstall.Tests.ps1`, `tests/UninstallWait.Tests.ps1` |
-| Store uninstall | Game Bar and existing protected package metadata are excluded. Preview and the removal boundary re-read the exact current full package identity and reject protected metadata or a known sparse manifest; unknown package inventory retains the selection. | `tests/Uninstall.Tests.ps1` |
+| Store uninstall | Game Bar and existing protected package metadata are excluded. Preview and the removal boundary re-read the exact current full package identity and reject protected metadata or a sparse, unreadable or incomplete manifest; unknown package inventory retains the selection. Discovery uses the same manifest rule, and app-cache v7 invalidates older rows. | `tests/Uninstall.Tests.ps1` |
 | Leftover recovery | `ITransferSource.RecycleItem` is used on fixed local drives, with no permanent-delete fallback. Identity and descendant protection are rechecked. Recycled bytes do not count as freed disk space. | `tests/Recycle.Tests.ps1` |
 | Analyze deletion | Explicit selection/confirmation, raw path validation, ancestor identity binding, protected-descendant inspection and a final recheck precede the native shell operation. A generic name such as `build` is not a cleanable hint without a valid cache tag. | `cmd/analyze/windows_test.go`, `cmd/analyze/cleanable_test.go` |
 | CLI installation/removal | Known files are merged without clearing shared directories. Unknown files and nonempty Git metadata survive self-removal. Linked install/config roots and ancestors and unrelated nonempty install roots are refused. A locked native launcher is rejected before PATH, shortcut or file mutation, with a direct PowerShell removal command. | `tests/Install.Tests.ps1`, `tests/InstallLifecycle.Tests.ps1` |
@@ -83,6 +83,14 @@ Owner-cache preview records the resolved root without treating the whole store a
 
 [RELEASE.md](RELEASE.md) defines signing and publication. Published asset signatures, checksum readback and package-manager delivery are separate verification steps; source tests cannot prove them. Checksums served alongside assets are integrity checks within the same distribution trust boundary, not independent provenance. This review did not publish or validate a new signed release.
 
+## Residual Closure Follow-up
+
+Frozen source `d1ab34a2`, paired with Mole CLI (macOS) `32b70a91`. Repairs are `3b6b0b0b` (Store eligibility) and `20d12930` (lint enforcement). Every original limitation below was rechecked; W06 was a concrete fail-open defect rather than an unavoidable platform limitation. `Test-RemovableAppxManifest` now serves discovery and the final preview/removal guard: unreadable, empty, non-XML, incomplete or unrecognized external-content evidence retains the package. A readable ordinary manifest with no external-content flag, or an explicit false/0 flag, remains eligible. The inventory cache moves to v7 so stale rows lose the old authorization assumption. No command, flag or setting was added.
+
+The old-source native run passed 142 tests and failed 11, including discovery and five unknown-manifest variants in preview and real mode. The repaired Uninstall, Router and UninstallWait set passed all 205 tests on both PowerShell 5.1.26100.9711 and 7.6.7 with Pester 6.2.0, zero failures/skips. The subsequent full-suite launches lost the Parallels execution-result channel; neither completion nor failure can be established, and retries stopped. The earlier 681-test receipts below are historical, not this revision's full-suite result. A successful exact-revision Windows CI run must supply the final native full-suite evidence, tracked separately from these local results.
+
+Windows-target ARM64 and AMD64 lint are clean after explicitly handling the read-only metadata-handle close result. The Check workflow now requires lint success; `actionlint` passes. This changes a validation gate, not the delete authorization policy. Heuristic security-pattern warnings remain advisory and do not establish a comprehensive security scan. Cross-build/native-test evidence and delivery boundaries are retained in [the development record](docs/development-record.md#2026-10-26-residual-closure).
+
 ## Verification Evidence
 
 The 2026-10-26 repair is `34f646c2`, based on `8bff8583`. `Remove-SafeItems` now rechecks its original path snapshot after the final owner callback, before both dry-run accounting and file removal. The single-item and directory helpers already performed the equivalent check. Three old-source cases failed for replaced files in real/preview mode and a parent changed to a junction; the unchanged-file positive control passed. This is a medium-severity local data-loss boundary, not a demonstrated privilege escalation.
@@ -98,7 +106,7 @@ Historical evidence at `88cf57e8`: [Check](https://github.com/tw93/Mole/actions/
 
 The checks have specific limits:
 
-- Go formatting and PowerShell parsing are enforced. `golangci-lint` is advisory through `continue-on-error`; a green workflow does not prove a clean lint result.
+- Go formatting, PowerShell parsing and pinned `golangci-lint` are enforced. The 2026-10-26 closure fixed the remaining Windows-target handle-close warning and removed `continue-on-error`; exact-revision CI still needs its own successful result.
 - The unsafe-removal and secret-pattern steps print findings without failing. They are review prompts, not enforced security gates or a comprehensive secret scanner.
 - Most recycle and uninstall tests use mocked sinks. `TestRecycleBinIntegration` is opt-in and requires an explicit disposable fixture. It is skipped by default. A separate ThinkPad run passed the real file/junction/directory recycle cases and PowerShell preview/recycle/restore checks; exact scope is recorded in the [development record](docs/development-record.md).
 - A Parallels run and a GitHub-hosted Windows run do not establish ThinkPad acceptance. Record the actual machine, tested revision, runtime versions, test summaries, exit codes and skipped cases before making that claim.
@@ -106,15 +114,19 @@ The checks have specific limits:
 
 ## Known Limitations
 
-- Permanent cleanup has no general undo, and a multi-file failure can leave a partially completed operation.
-- Identity rechecks are not atomic with deletion or with a third-party owner command's work.
-- Analyze's traversal checks use a ten-second checkpoint budget and a 100,000-entry cap. A blocking Windows filesystem call is not forcibly cancelled by that checkpoint budget; oversized or incomplete inspections are refused.
-- Native shell recycling waits for the shell's result. A long-running shell call is not reported as complete merely because a timer elapsed.
-- A cache tag is an owner's declaration, not proof that arbitrary contents are unimportant or untracked.
-- Store manifests are not completely classified when unreadable. The established ordinary Store uninstall behavior remains in that case; current package inventory must still be readable and eligible.
-- Leftover ownership is based on registered install locations and current-user Appx inventory. Unregistered portable applications or missing vendor metadata cannot be exhaustively classified.
-- Purge reads Git without the user's Git configuration. A repository Git refuses to open, such as one owned by another non-administrator account, keeps its artifacts even when the user's global `safe.directory` lists it (verified on Windows PowerShell 5.1: plain `git status` exit 0, Purge's isolated call exit 128).
-- Uninstaller waiting retains PowerShell's process-tree semantics; it is not a sandbox for vendor code or detached services. The deadline does not prove an idle process is finished. Native process start or consent dialogs can block outside the cancellable wait; UAC and real vendor behavior remain separate acceptance surfaces.
-- Automated tests cover controlled fixtures. They do not establish safety for every filesystem provider, locked-file state, running application or administrator configuration.
+The original ten entries are individually closed as a repair or an explicit retained boundary. They are not ten remaining implementation defects.
+
+| ID | Disposition | Reason and current boundary |
+| --- | --- | --- |
+| W01 | No code change | Permanent cleanup has no general undo, and multi-file failure can leave partial completion. Switching every cleanup to recycling would change the existing reclaim-space contract. |
+| W02 | No code change | Final path/owner rechecks close demonstrated stale-evidence gaps, but cannot make a filesystem or third-party owner action atomic. |
+| W03 | No code change | Analyze checks a ten-second traversal budget and 100,000-entry cap. A blocking filesystem-provider call is not forcibly cancellable through that API; oversized or incomplete inspection retains the target. |
+| W04 | No code change | Native recycling waits for the shell's result. A timer cannot safely turn an unknown in-flight operation into success or undo it. |
+| W05 | No code change | Cache tags are owner declarations used for Analyze hints, not automatic deletion authorization or proof that contents are unimportant. |
+| W06 | Fixed and regression-tested | Unknown Store manifest evidence no longer allows listing or removal. Discovery, preview and the final boundary share the conservative predicate; ordinary-package positive controls remain eligible. |
+| W07 | No code change | Leftover ownership uses complete registered locations and current-user Appx inventory. Unregistered portable applications and missing vendor metadata have no exhaustive authoritative inventory; broad guesses would weaken protection. |
+| W08 | No code change | Purge deliberately isolates Git configuration. A repository refused by Git keeps its artifacts even when the user's global safe.directory lists it. Accepting untrusted configuration to reclaim more would weaken the execution boundary. |
+| W09 | No code change | Vendor waiting preserves process-tree semantics and stops the batch on timeout/cancellation without killing the vendor. Native process launch/UAC and detached services are outside that wait's cancellation guarantee; registration disappearance or idleness does not prove completion. |
+| W10 | Ongoing verification | Controlled fixtures and hosted CI do not prove every filesystem provider, running application, real UAC/uninstaller, physical machine or signed package. Missing execution evidence stays unverified, including this follow-up's interrupted VM result channel. |
 
 For private vulnerability reporting, see [SECURITY.md](SECURITY.md). Keep this review aligned with changed safety boundaries and retain dated runtime evidence in the development record.
