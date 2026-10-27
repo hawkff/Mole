@@ -72,6 +72,31 @@ Helium Helper (Renderer)'; do
     [ "$code_sign_cleaned" -eq 2 ]
 }
 
+@test "browser clone cleanup reaches Brave and Brave Origin and retains them while Brave runs" {
+    local brave="$CLONE_ROOT/com.brave.Browser.code_sign_clone/code_sign_clone.3WbE5u"
+    local origin="$CLONE_ROOT/com.brave.Browser.origin.nightly.code_sign_clone/code_sign_clone.4XcF6v"
+    local fixture clone id app
+    for fixture in "$brave|com.brave.Browser|Brave Browser" "$origin|com.brave.Browser.origin.nightly|Brave Origin Nightly"; do
+        IFS='|' read -r clone id app <<<"$fixture"
+        mkdir -p "$clone/$app.app.bundle/Contents/MacOS"
+        printf 'fixture executable' >"$clone/$app.app.bundle/Contents/MacOS/$app"
+        /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $id" "$clone/$app.app.bundle/Contents/Info.plist" >/dev/null
+        /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $app" "$clone/$app.app.bundle/Contents/Info.plist"
+    done
+    for PROCESS_TABLE in '/sbin/launchd
+/Applications/Brave Browser.app/Contents/MacOS/Brave Browser' '/sbin/launchd
+Brave Browser Helper (Renderer)' '/sbin/launchd
+/Applications/Brave Origin Nightly.app/Contents/MacOS/Brave Origin Nightly' '/sbin/launchd
+/Applications/Work.app/Contents/MacOS/Brave Browser Nightly'; do
+        clean_browser_code_sign_clones
+    done
+    [ ! -s "$CALLS" ]
+    PROCESS_TABLE=/sbin/launchd clean_browser_code_sign_clones
+    grep -qx "$brave" "$CALLS"
+    grep -qx "$origin" "$CALLS"
+    [ "$code_sign_cleaned" -eq 3 ]
+}
+
 @test "browser clone cleanup retains running browser helpers and unknown process probes" {
     for PROCESS_TABLE in '/sbin/launchd
 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome' '/sbin/launchd

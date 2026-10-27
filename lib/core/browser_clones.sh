@@ -21,10 +21,14 @@ _mole_browser_clones_idle() {
             *"/Google Chrome"*".app/"* | *"/Google Chrome"*".app.bundle/"* | \
                 *"/Chromium.app/"* | *"/Chromium.app.bundle/"* | \
                 *"/Helium.app/"* | *"/Helium.app.bundle/"* | \
+                *"/Brave Browser"*".app/"* | *"/Brave Browser"*".app.bundle/"* | \
+                *"/Brave Origin"*".app/"* | *"/Brave Origin"*".app.bundle/"* | \
                 *"/com.google.Chrome"*".code_sign_clone/"* | *"/org.chromium.Chromium.code_sign_clone/"* | \
-                *"/net.imput.helium.code_sign_clone/"* | \
+                *"/net.imput.helium.code_sign_clone/"* | *"/com.brave.Browser"*".code_sign_clone/"* | \
                 "Google Chrome"* | "Chromium" | *"/Google Chrome" | *"/Chromium" | \
-                "Helium" | "Helium Helper"* | *"/Helium") return 1 ;;
+                "Helium" | "Helium Helper"* | *"/Helium" | \
+                "Brave Browser"* | "Brave Origin"* | *"/Brave Browser" | *"/Brave Origin" | \
+                *"/Contents/MacOS/Brave Browser"* | *"/Contents/MacOS/Brave Origin"*) return 1 ;;
         esac
     done <<< "$output"
 }
@@ -44,6 +48,14 @@ _mole_browser_clone_snapshot() {
         # Helium: 20 idle clones left on a Mac (2026-10-19). Mole Mac parity:
         # BrowserClonePolicy.browsers.
         net.imput.helium.code_sign_clone) app="Helium" ;;
+        # Brave and Brave Origin: 112 idle clones of 19 versions left on a Mac
+        # (2026-10-26). Ids and names from brave-core app/theme/*/BRANDING*.
+        com.brave.Browser.code_sign_clone) app="Brave Browser" ;;
+        com.brave.Browser.beta.code_sign_clone) app="Brave Browser Beta" ;;
+        com.brave.Browser.nightly.code_sign_clone) app="Brave Browser Nightly" ;;
+        com.brave.Browser.origin.code_sign_clone) app="Brave Origin" ;;
+        com.brave.Browser.origin.beta.code_sign_clone) app="Brave Origin Beta" ;;
+        com.brave.Browser.origin.nightly.code_sign_clone) app="Brave Origin Nightly" ;;
         *) return 1 ;;
     esac
     [[ "${rest#*/}" =~ ^code_sign_clone\.[A-Za-z0-9]{6}$ ]] || return 1
@@ -99,7 +111,9 @@ clean_browser_code_sign_clones() {
     [[ $rc -lt 128 ]] || return "$rc"
     [[ $rc -eq 0 ]] || return 0
     local _MOLE_BROWSER_CLONE_REVIEW="" _MOLE_SAFE_REMOVE_FINAL_GUARD=_mole_browser_clone_final_guard
-    for id in com.google.Chrome com.google.Chrome.beta com.google.Chrome.dev com.google.Chrome.canary org.chromium.Chromium net.imput.helium; do
+    for id in com.google.Chrome com.google.Chrome.beta com.google.Chrome.dev com.google.Chrome.canary org.chromium.Chromium net.imput.helium \
+        com.brave.Browser com.brave.Browser.beta com.brave.Browser.nightly \
+        com.brave.Browser.origin com.brave.Browser.origin.beta com.brave.Browser.origin.nightly; do
         for path in "$root/$id.code_sign_clone"/code_sign_clone.*; do
             [[ -d "$path" && ! -L "$path" ]] || continue
             system_cleanup_budget_reached "$deadline" && return 0
