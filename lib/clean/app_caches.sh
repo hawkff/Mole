@@ -915,6 +915,9 @@ clean_wechat_container_caches() {
 clean_communication_apps() {
     mole_safe_clean_app_cache "Discord" ~/Library/Application\ Support/discord/Cache/* "Discord cache"
     mole_safe_clean_app_cache "Legcord" ~/Library/Application\ Support/legcord/Cache/* "Legcord cache"
+    # Vesktop moves Electron's session data to sessionData; its vencordFiles sibling stays.
+    mole_safe_clean_app_cache "Vesktop" ~/Library/Application\ Support/vesktop/sessionData/Cache/* "Vesktop cache"
+    mole_safe_clean_app_cache "Vesktop" ~/Library/Application\ Support/vesktop/sessionData/Code\ Cache/* "Vesktop code cache"
     mole_safe_clean_app_cache "Slack" ~/Library/Application\ Support/Slack/Cache/* "Slack cache"
     safe_clean ~/Library/Caches/us.zoom.xos/* "Zoom cache"
     safe_clean ~/Library/Caches/com.tencent.xinWeChat/* "WeChat cache"

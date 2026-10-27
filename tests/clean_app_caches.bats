@@ -853,6 +853,53 @@ EOF
     [[ "$output" == *"Microsoft Teams legacy logs"* ]]
 }
 
+@test "clean_communication_apps cleans Vesktop session caches only while Vesktop is not running" {
+    local mode root kept
+    for mode in idle running; do
+        root="$BATS_TEST_TMPDIR/vesktop-$mode/Library/Application Support/vesktop"
+        run env HOME="$BATS_TEST_TMPDIR/vesktop-$mode" PROJECT_ROOT="$PROJECT_ROOT" MODE="$mode" \
+            /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+root="$HOME/Library/Application Support/vesktop"
+mkdir -p "$root/sessionData/Cache/Cache_Data" "$root/sessionData/Code Cache/js" \
+    "$root/sessionData/vencordFiles" "$root/sessionData/Local Storage/leveldb" \
+    "$root/sessionData/IndexedDB" "$root/settings" "$root/themes"
+touch "$root/sessionData/Cache/Cache_Data/data_0" "$root/sessionData/Code Cache/js/index" \
+    "$root/sessionData/vencordFiles/vencordDesktopMain.js" \
+    "$root/sessionData/Local Storage/leveldb/CURRENT" "$root/sessionData/IndexedDB/entry" \
+    "$root/settings/settings.json" "$root/themes/theme.css" "$root/settings.json" "$root/state.json"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+# Vesktop's executable is lowercase, so only its bundle path names the app.
+procs=/sbin/launchd
+[[ "$MODE" == idle ]] || procs+=$'\n/Applications/Vesktop.app/Contents/MacOS/vesktop'
+pgrep() {
+    local line
+    while IFS= read -r line; do
+        case "$1" in
+            -x) [[ "${line##*/}" =~ ^($2)$ ]] && return 0 ;;
+            -f) [[ "$line" =~ $2 ]] && return 0 ;;
+        esac
+    done <<<"$procs"
+    return 1
+}
+safe_clean() { printf 'CLEAN:%s\n' "$@"; }
+clean_communication_apps
+EOF
+        [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+        if [[ "$mode" == idle ]]; then
+            [[ "$output" == *"CLEAN:$root/sessionData/Cache/Cache_Data"* ]] || { echo "$output"; return 1; }
+            [[ "$output" == *"CLEAN:$root/sessionData/Code Cache/js"* ]] || { echo "$output"; return 1; }
+        else
+            [[ "$output" != *"vesktop/sessionData"* ]] || { echo "$output"; return 1; }
+        fi
+        for kept in sessionData/vencordFiles "sessionData/Local Storage" sessionData/IndexedDB \
+            settings themes settings.json state.json; do
+            [[ "$output" != *"CLEAN:$root/$kept"* ]] || { echo "$mode kept $kept: $output"; return 1; }
+        done
+    done
+}
+
 @test "named Application Support caches keep running and unknown owners and recheck after sizing" {
     for mode in running unknown starts-during-size idle; do
         run env HOME="$BATS_TEST_TMPDIR/named-$mode" PROJECT_ROOT="$PROJECT_ROOT" MODE="$mode" \
