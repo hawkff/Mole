@@ -86,7 +86,8 @@ Helium Helper (Renderer)'; do
     for PROCESS_TABLE in '/sbin/launchd
 /Applications/Brave Browser.app/Contents/MacOS/Brave Browser' '/sbin/launchd
 Brave Browser Helper (Renderer)' '/sbin/launchd
-/Applications/Brave Origin Nightly.app/Contents/MacOS/Brave Origin Nightly'; do
+/Applications/Brave Origin Nightly.app/Contents/MacOS/Brave Origin Nightly' '/sbin/launchd
+/Applications/Work.app/Contents/MacOS/Brave Browser Nightly'; do
         clean_browser_code_sign_clones
     done
     [ ! -s "$CALLS" ]

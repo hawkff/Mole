@@ -27,7 +27,8 @@ _mole_browser_clones_idle() {
                 *"/net.imput.helium.code_sign_clone/"* | *"/com.brave.Browser"*".code_sign_clone/"* | \
                 "Google Chrome"* | "Chromium" | *"/Google Chrome" | *"/Chromium" | \
                 "Helium" | "Helium Helper"* | *"/Helium" | \
-                "Brave Browser"* | "Brave Origin"* | *"/Brave Browser" | *"/Brave Origin") return 1 ;;
+                "Brave Browser"* | "Brave Origin"* | *"/Brave Browser" | *"/Brave Origin" | \
+                *"/Contents/MacOS/Brave Browser"* | *"/Contents/MacOS/Brave Origin"*) return 1 ;;
         esac
     done <<< "$output"
 }
